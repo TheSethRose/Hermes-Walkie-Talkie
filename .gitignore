@@ -29,6 +29,7 @@ build/
 
 # Tool transcripts/history
 .antigravity/
+repomix-*.xml
 
 # Kotlin local state
 .kotlin/

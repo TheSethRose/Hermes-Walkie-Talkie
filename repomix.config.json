@@ -1,0 +1,73 @@
+{
+  "$schema": "https://repomix.com/schemas/latest/schema.json",
+  "input": {
+    "maxFileSize": 1000000
+  },
+  "output": {
+    "filePath": "repomix-output.xml",
+    "style": "xml",
+    "parsableStyle": true,
+    "fileSummary": true,
+    "directoryStructure": true,
+    "files": true,
+    "removeComments": false,
+    "removeEmptyLines": false,
+    "topFilesLength": 10,
+    "showLineNumbers": true,
+    "truncateBase64": true,
+    "git": {
+      "sortByChanges": true,
+      "includeDiffs": true,
+      "includeLogs": false
+    }
+  },
+  "include": [
+    "repomix.config.json",
+    "README.md",
+    ".gitignore",
+    "android/README.md",
+    "android/.env.example",
+    "android/.gitignore",
+    "android/app/.gitignore",
+    "android/**/*.kt",
+    "android/**/*.kts",
+    "android/**/*.xml",
+    "android/**/*.toml",
+    "android/**/*.properties",
+    "android/**/*.pro",
+    "android/gradlew",
+    "android/gradlew.bat",
+    "android/metadata.json",
+    "gateway/README.md",
+    "gateway/.env.example",
+    "gateway/package.json",
+    "gateway/bun.lock",
+    "gateway/tsconfig.json",
+    "gateway/src/**/*.ts"
+  ],
+  "ignore": {
+    "useGitignore": true,
+    "useDotIgnore": true,
+    "useDefaultPatterns": true,
+    "customPatterns": [
+      "repomix-output.*",
+      "repomix-*.xml",
+      "**/.DS_Store",
+      "**/.env",
+      "android/.gradle/**",
+      "android/**/build/**",
+      "android/.kotlin/**",
+      "android/gradle/wrapper/gradle-wrapper.jar",
+      "android/app/src/test/screenshots/**",
+      "android/app/src/main/res/mipmap-*/**/*.webp",
+      "gateway/storage/**",
+      "gateway/node_modules/**"
+    ]
+  },
+  "security": {
+    "enableSecurityCheck": true
+  },
+  "tokenCount": {
+    "encoding": "o200k_base"
+  }
+}
