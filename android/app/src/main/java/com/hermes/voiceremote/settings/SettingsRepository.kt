@@ -39,7 +39,9 @@ class SettingsRepository(private val context: Context) {
         return try {
             val baseUrl = prefs.getString(KEY_BASE_URL, "") ?: ""
             val apiKey = prefs.getString(KEY_API_KEY, "") ?: ""
-            val agentProfile = prefs.getString(KEY_AGENT_PROFILE, "Vex Volt") ?: "Vex Volt"
+            val legacyAgentProfile = prefs.getString(KEY_AGENT_PROFILE, null)
+            val selectedProfileId = prefs.getString(KEY_SELECTED_PROFILE_ID, legacyAgentProfile ?: "main") ?: "main"
+            val selectedProfileName = prefs.getString(KEY_SELECTED_PROFILE_NAME, legacyAgentProfile ?: selectedProfileId) ?: selectedProfileId
             
             val responseModeStr = prefs.getString(KEY_RESPONSE_MODE, ResponseMode.TEXT_AUDIO.name)
             val responseMode = try {
@@ -59,7 +61,8 @@ class SettingsRepository(private val context: Context) {
                 HermesSettings(
                     baseUrl = baseUrl,
                     apiKey = apiKey,
-                    agentProfile = agentProfile,
+                    selectedProfileId = selectedProfileId,
+                    selectedProfileName = selectedProfileName,
                     responseMode = responseMode,
                     audioInputPreference = audioPref
                 )
@@ -80,7 +83,8 @@ class SettingsRepository(private val context: Context) {
             val success = prefs.edit()
                 .putString(KEY_BASE_URL, normalizedUrl)
                 .putString(KEY_API_KEY, settings.apiKey.trim())
-                .putString(KEY_AGENT_PROFILE, settings.agentProfile.trim())
+                .putString(KEY_SELECTED_PROFILE_ID, settings.selectedProfileId.trim())
+                .putString(KEY_SELECTED_PROFILE_NAME, settings.selectedProfileName.trim())
                 .putString(KEY_RESPONSE_MODE, settings.responseMode.name)
                 .putString(KEY_AUDIO_INPUT_PREF, settings.audioInputPreference.name)
                 .commit()
@@ -98,7 +102,7 @@ class SettingsRepository(private val context: Context) {
         val settingsResult = getSettings()
         if (settingsResult.isFailure) return false
         val settings = settingsResult.getOrNull() ?: return false
-        return settings.baseUrl.isNotEmpty() && settings.apiKey.isNotEmpty() && settings.agentProfile.isNotEmpty()
+        return settings.baseUrl.isNotEmpty() && settings.apiKey.isNotEmpty() && settings.selectedProfileId.isNotEmpty()
     }
 
     fun normalizeBaseUrl(url: String): String {
@@ -109,6 +113,8 @@ class SettingsRepository(private val context: Context) {
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_API_KEY = "api_key"
         private const val KEY_AGENT_PROFILE = "agent_profile"
+        private const val KEY_SELECTED_PROFILE_ID = "selected_profile_id"
+        private const val KEY_SELECTED_PROFILE_NAME = "selected_profile_name"
         private const val KEY_RESPONSE_MODE = "response_mode"
         private const val KEY_AUDIO_INPUT_PREF = "audio_input_pref"
     }

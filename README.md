@@ -32,6 +32,18 @@ bun install
 bun run dev
 ```
 
+From the repo root, the same dev server can be launched with:
+
+```sh
+make gateway-dev
+```
+
+For production-like local startup:
+
+```sh
+make gateway-start
+```
+
 Set a real API key in `gateway/.env`:
 
 ```env
@@ -40,7 +52,7 @@ GATEWAY_API_KEY=replace-with-a-long-random-value
 
 The Android app must use the same API key.
 
-## Connecting To A Hermes Profile
+## Connecting To Hermes Profiles
 
 The default gateway mode calls the local Hermes CLI:
 
@@ -48,22 +60,10 @@ The default gateway mode calls the local Hermes CLI:
 HERMES_MODE=cli
 HERMES_CLI_COMMAND=hermes
 HERMES_CLI_ARGS_TEMPLATE=-z {prompt}
-HERMES_AGENT=main
+HERMES_PROFILE_SOURCE=auto
 ```
 
-`HERMES_AGENT` is stored with gateway sessions and forwarded to adapters, but the default CLI template uses the currently active Hermes profile. To use a specific Hermes profile, set `HERMES_CLI_COMMAND` or `HERMES_CLI_ARGS_TEMPLATE` to the command shape your Hermes install supports.
-
-Examples:
-
-```env
-# Default/current Hermes profile
-HERMES_CLI_COMMAND=hermes
-HERMES_CLI_ARGS_TEMPLATE=-z {prompt}
-
-# Wrapper script or alias for a specific profile
-HERMES_CLI_COMMAND=hermes-my-profile
-HERMES_CLI_ARGS_TEMPLATE=-z {prompt}
-```
+The gateway exposes `GET /profiles` and discovers local Hermes profiles with `hermes profile list` by default. The Android app loads that list in Settings and stores the selected profile id/name.
 
 Speech-to-text and text-to-speech default to Hermes built-ins:
 
@@ -98,7 +98,7 @@ Set those Python paths to the Python binary inside the Hermes installation venv 
    ```text
    Base URL: http://<tailscale-ip>:8789
    API key: <same value as GATEWAY_API_KEY>
-   Agent/profile: main
+   Profile: load and select one from the Hermes Profile list
    ```
 
 MagicDNS also works when enabled:
@@ -127,4 +127,28 @@ curl -H "Authorization: Bearer $GATEWAY_API_KEY" http://<tailscale-ip>:8789/heal
 
 Open `android/` in Android Studio.
 
-The app stores the gateway URL, API key, agent/profile name, response mode, and audio route preference in its settings screen. No build-time API key is required.
+The app stores the gateway URL, API key, selected profile, response mode, and audio route preference in its settings screen. No build-time API key is required.
+
+To build the debug APK from the repo root:
+
+```sh
+make android-build
+```
+
+To build, install, and launch it on a USB debugging device:
+
+```sh
+make android-deploy
+```
+
+To launch an already-installed build:
+
+```sh
+make android-launch
+```
+
+If `JAVA_HOME` needs to point somewhere else:
+
+```sh
+make android-deploy ANDROID_JAVA_HOME=/path/to/jbr-or-jdk
+```

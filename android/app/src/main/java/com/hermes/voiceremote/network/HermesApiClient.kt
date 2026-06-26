@@ -115,7 +115,8 @@ class HermesApiClient {
             }
             
             val requestBodyObj = CreateSessionRequest(
-                agent = settings.agentProfile,
+                profileId = settings.selectedProfileId,
+                agent = settings.selectedProfileName,
                 responseMode = responseModeStr
             )
             val jsonAdapter = moshi.adapter(CreateSessionRequest::class.java)
@@ -173,7 +174,8 @@ class HermesApiClient {
                 .setType(MultipartBody.FORM)
                 .addFormDataPart("audio", "audio.m4a", audioBody)
                 .addFormDataPart("format", "m4a")
-                .addFormDataPart("agent", settings.agentProfile)
+                .addFormDataPart("profileId", settings.selectedProfileId)
+                .addFormDataPart("agent", settings.selectedProfileName)
                 .addFormDataPart("responseMode", responseModeStr)
                 .build()
 
@@ -195,6 +197,44 @@ class HermesApiClient {
     }
 
     suspend fun cancel(settings: HermesSettings, sessionId: String): Result<Unit> {
+        return postSessionAction(settings, HermesGatewayRoutes.cancel(sessionId), sessionId)
+    }
+
+    suspend fun resetSession(settings: HermesSettings, sessionId: String): Result<Unit> {
+        return postSessionAction(settings, HermesGatewayRoutes.reset(sessionId), sessionId)
+    }
+
+    suspend fun endSession(settings: HermesSettings, sessionId: String): Result<Unit> {
+        return postSessionAction(settings, HermesGatewayRoutes.end(sessionId), sessionId)
+    }
+
+    suspend fun getProfiles(settings: HermesSettings): Result<ProfilesResponse> {
+        try {
+            if (settings.baseUrl.isEmpty()) {
+                return Result.failure(IllegalArgumentException("Base URL is empty"))
+            }
+            if (settings.apiKey.isEmpty()) {
+                return Result.failure(IllegalArgumentException("API Key is empty"))
+            }
+
+            val url = getUrl(settings.baseUrl, HermesGatewayRoutes.PROFILES)
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .header("Authorization", "Bearer ${settings.apiKey}")
+                .build()
+
+            val resultStr = executeCancellable(request)
+            return resultStr.map { bodyStr ->
+                val adapter = moshi.adapter(ProfilesResponse::class.java)
+                adapter.fromJson(bodyStr) ?: throw IOException("Invalid JSON response")
+            }
+        } catch (e: Exception) {
+            return Result.failure(e)
+        }
+    }
+
+    private suspend fun postSessionAction(settings: HermesSettings, path: String, sessionId: String): Result<Unit> {
         try {
             if (settings.baseUrl.isEmpty()) {
                 return Result.failure(IllegalArgumentException("Base URL is empty"))
@@ -206,16 +246,14 @@ class HermesApiClient {
                 return Result.failure(IllegalArgumentException("Session ID is empty"))
             }
 
-            val url = getUrl(settings.baseUrl, HermesGatewayRoutes.cancel(sessionId))
             val requestBody = "".toRequestBody("application/json".toMediaTypeOrNull())
             val request = Request.Builder()
-                .url(url)
+                .url(getUrl(settings.baseUrl, path))
                 .post(requestBody)
                 .header("Authorization", "Bearer ${settings.apiKey}")
                 .build()
 
-            val resultStr = executeCancellable(request)
-            return resultStr.map { }
+            return executeCancellable(request).map { }
         } catch (e: Exception) {
             return Result.failure(e)
         }

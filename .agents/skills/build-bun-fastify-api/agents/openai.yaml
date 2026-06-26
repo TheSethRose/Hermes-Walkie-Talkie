@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Bun Fastify API"
+  short_description: "Build Bun and Fastify TypeScript APIs"
+  default_prompt: "Use $build-bun-fastify-api to build or repair a Bun Fastify TypeScript API."

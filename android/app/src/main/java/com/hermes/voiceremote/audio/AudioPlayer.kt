@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import okhttp3.Call
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
@@ -19,11 +20,14 @@ class AudioPlayer(private val context: Context) {
     private var mediaPlayer: MediaPlayer? = null
     private var onCompleteCallback: (() -> Unit)? = null
     private var currentCacheFile: File? = null
+    private var currentCall: Call? = null
+    @Volatile private var stopped = false
     private val httpClient = OkHttpClient.Builder().build()
 
     suspend fun play(url: String, apiKey: String?): Result<Unit> = withContext(Dispatchers.IO) {
         try {
             stop()
+            stopped = false
             
             val mediaSource: String
             if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -35,7 +39,10 @@ class AudioPlayer(private val context: Context) {
                     requestBuilder.header("Authorization", "Bearer $apiKey")
                 }
                 
-                httpClient.newCall(requestBuilder.build()).execute().use { response ->
+                val call = httpClient.newCall(requestBuilder.build())
+                currentCall = call
+                call.execute().use { response ->
+                    if (stopped) throw IOException("Playback stopped")
                     if (!response.isSuccessful) {
                         throw IOException("Failed to download audio file: HTTP ${response.code}")
                     }
@@ -44,6 +51,8 @@ class AudioPlayer(private val context: Context) {
                         body.byteStream().copyTo(fos)
                     }
                 }
+                currentCall = null
+                if (stopped) throw IOException("Playback stopped")
                 mediaSource = cacheFile.absolutePath
             } else {
                 mediaSource = url
@@ -62,7 +71,16 @@ class AudioPlayer(private val context: Context) {
                     }
 
                     player.setOnPreparedListener {
-                        it.start()
+                        if (stopped) {
+                            it.release()
+                            mediaPlayer = null
+                            cleanCache()
+                            if (continuation.isActive) {
+                                continuation.resume(Result.failure(IOException("Playback stopped")))
+                            }
+                        } else {
+                            it.start()
+                        }
                     }
 
                     player.setOnCompletionListener {
@@ -111,6 +129,9 @@ class AudioPlayer(private val context: Context) {
     }
 
     fun stop() {
+        stopped = true
+        currentCall?.cancel()
+        currentCall = null
         try {
             mediaPlayer?.let { player ->
                 if (player.isPlaying) {
@@ -128,6 +149,10 @@ class AudioPlayer(private val context: Context) {
 
     fun release() {
         stop()
+    }
+
+    fun isPlaying(): Boolean {
+        return mediaPlayer?.isPlaying == true || currentCall != null
     }
 
     private fun cleanCache() {

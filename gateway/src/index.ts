@@ -4,8 +4,11 @@ import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { audioRoutes } from "./routes/audio.js";
 import { healthRoutes } from "./routes/health.js";
+import { profileRoutes } from "./routes/profiles.js";
 import { voiceRoutes } from "./routes/voice.js";
+import { ProfileStore } from "./services/profileStore.js";
 import { SessionStore } from "./services/sessionStore.js";
+import { PersistentSttWorker } from "./services/sttWorker.js";
 import { ensureStorageDirs } from "./utils/files.js";
 import { loggerOptions } from "./utils/logger.js";
 
@@ -47,11 +50,18 @@ await app.register(multipart, {
 });
 
 const sessions = new SessionStore();
+const profiles = new ProfileStore(config);
+const sttWorker = config.sttProvider === "hermes" && !config.mockMode ? new PersistentSttWorker(config) : undefined;
+sttWorker?.start();
 await healthRoutes(app, config);
-await voiceRoutes(app, config, sessions);
+await profileRoutes(app, config, profiles);
+await voiceRoutes(app, config, sessions, profiles, sttWorker);
 await audioRoutes(app, config);
 
 await app.listen({ host: config.host, port: config.port });
+void profiles.list().catch((error) => app.log.warn({ err: error }, "Profile prewarm failed"));
+process.once("SIGINT", () => sttWorker?.stop());
+process.once("SIGTERM", () => sttWorker?.stop());
 
 function hasStatusCode(error: unknown): error is { statusCode: number } {
   return typeof error === "object" && error !== null && "statusCode" in error;

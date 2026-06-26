@@ -37,3 +37,15 @@
 - `gateway/storage/audio/` and `gateway/storage/uploads/` are runtime output directories. Do not commit generated audio/uploads.
 - `android/app/src/test/screenshots/` contains test screenshot artifacts. Update them only when the visual test expectation intentionally changes.
 - Keep `gateway/bun.lock` with dependency changes. Do not add dependencies unless existing platform, stdlib, or installed packages are insufficient.
+
+## Custom Agent Skills
+
+This repository includes two specialized agent skills to guide task execution:
+
+1. **build-android-app** ([SKILL.md](file:///.agents/skills/build-android-app/SKILL.md))
+   - **When to use**: Whenever you modify or debug the native Android app under `android/`, Jetpack Compose UI, ViewModels, Room local database, network API clients, or Gradle build files.
+   - **How to use**: Refer to guidelines in `SKILL.md` and the `references/` subdirectory (covering compose/Material 3, edge-to-edge, state flow, and runtime permissions). Run validations inside the `android/` directory (e.g. `./gradlew testDebugUnitTest` and Roborazzi screenshot test commands).
+
+2. **build-bun-fastify-api** ([SKILL.md](file:///.agents/skills/build-bun-fastify-api/SKILL.md))
+   - **When to use**: Whenever you modify, debug, or validate the local voice gateway under `gateway/`, including Fastify route handlers, Zod schema validation, bearer authentication, child process execution, or service logic.
+   - **How to use**: Refer to guidelines in `SKILL.md` and the `references/` subdirectory (covering fastify routes, config/auth/security, child process spawning, and runtime boundaries). Run validations inside the `gateway/` directory (e.g. `bun run typecheck`).

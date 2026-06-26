@@ -20,7 +20,8 @@ enum class AudioRoute {
 data class HermesSettings(
     val baseUrl: String,
     val apiKey: String,
-    val agentProfile: String,
+    val selectedProfileId: String,
+    val selectedProfileName: String,
     val responseMode: ResponseMode,
     val audioInputPreference: AudioInputPreference
 )

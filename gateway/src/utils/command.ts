@@ -7,9 +7,18 @@ export type CommandResult = {
   timedOut: boolean;
 };
 
-export function runCommand(command: string, args: string[], timeoutMs: number): Promise<CommandResult> {
+export function runCommand(
+  command: string,
+  args: string[],
+  timeoutMs: number,
+  options: { env?: Record<string, string> } = {}
+): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, {
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: options.env ? { ...process.env, ...options.env } : process.env
+    });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     let timedOut = false;
@@ -63,5 +72,5 @@ export function parseArgsTemplate(template: string, values: Record<string, strin
 }
 
 function replaceTemplateValues(input: string, values: Record<string, string>) {
-  return input.replace(/\{(agent|prompt|sessionId)\}/g, (_, key: string) => values[key] ?? "");
+  return input.replace(/\{(agent|profileId|prompt|conversation|sessionId)\}/g, (_, key: string) => values[key] ?? "");
 }

@@ -4,8 +4,11 @@ import { parseArgsTemplate, runCommand } from "../utils/command.js";
 
 export type HermesBridgeRequest = {
   sessionId: string;
+  profileId: string;
+  hermesHome?: string;
   agent: string;
   transcript: string;
+  history: Array<{ userText: string; assistantText: string; createdAt: string }>;
 };
 
 export type HermesBridgeResponse = {
@@ -35,12 +38,32 @@ class CliHermesBridge implements HermesBridge {
   constructor(private config: AppConfig) {}
 
   async sendTurn(input: HermesBridgeRequest) {
+    const conversation = buildConversationPrompt(input, this.config.hermesMaxHistoryTurns);
+    const prompt = this.config.hermesCliArgsTemplate.includes("{conversation}") ? conversation : (
+      this.config.hermesContextMode === "gateway_history" ? conversation : input.transcript
+    );
     const args = parseArgsTemplate(this.config.hermesCliArgsTemplate, {
       agent: input.agent,
-      prompt: input.transcript,
+      profileId: input.profileId,
+      prompt,
+      conversation,
       sessionId: input.sessionId
     });
-    const result = await runCommand(this.config.hermesCliCommand, args, this.config.hermesTimeoutMs);
+    logger.info(
+      {
+        sessionId: input.sessionId,
+        profileId: input.profileId,
+        agent: input.agent,
+        hermesHome: input.hermesHome,
+        argsTemplate: this.config.hermesCliArgsTemplate
+      },
+      "Starting Hermes CLI turn"
+    );
+    const result = await runCommand(this.config.hermesCliCommand, args, this.config.hermesTimeoutMs, {
+      env: {
+        ...(input.hermesHome ? { HERMES_HOME: input.hermesHome } : {})
+      }
+    });
 
     if (result.timedOut || result.exitCode !== 0) {
       logger.error(
@@ -76,8 +99,11 @@ class HttpHermesBridge implements HermesBridge {
       headers,
       body: JSON.stringify({
         sessionId: input.sessionId,
+        profileId: input.profileId,
+        hermesHome: input.hermesHome,
         agent: input.agent,
-        message: input.transcript
+        message: input.transcript,
+        history: input.history
       })
     });
 
@@ -92,4 +118,27 @@ class HttpHermesBridge implements HermesBridge {
   }
 
   async cancel() {}
+}
+
+function buildConversationPrompt(input: HermesBridgeRequest, maxTurns: number) {
+  const history = input.history.slice(-maxTurns);
+  if (history.length === 0) return input.transcript;
+
+  const previous = history
+    .map((turn) => `User: ${turn.userText}\nAssistant: ${turn.assistantText}`)
+    .join("\n\n");
+
+  return [
+    "You are continuing an existing Hermes agent conversation.",
+    "",
+    "Previous conversation:",
+    previous,
+    "",
+    "New user message:",
+    input.transcript,
+    "",
+    "Respond as the selected Hermes profile.",
+    "",
+    "Do not duplicate old responses."
+  ].join("\n");
 }

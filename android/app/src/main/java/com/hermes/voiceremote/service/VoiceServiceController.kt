@@ -26,6 +26,14 @@ class VoiceServiceController(private val context: Context) {
         sendIntent(VoiceSessionService.ACTION_RESET)
     }
 
+    fun replayLastResponse() {
+        sendIntent(VoiceSessionService.ACTION_REPLAY_LAST_RESPONSE)
+    }
+
+    fun newSession() {
+        sendIntent(VoiceSessionService.ACTION_NEW_SESSION)
+    }
+
     private fun sendIntent(action: String) {
         val intent = Intent(context, VoiceSessionService::class.java).apply {
             this.action = action

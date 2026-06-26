@@ -17,6 +17,7 @@ import com.hermes.voiceremote.settings.AudioRoute
 import com.hermes.voiceremote.settings.ResponseMode
 import com.hermes.voiceremote.settings.SettingsRepository
 import com.hermes.voiceremote.state.VoiceSessionStatus
+import com.hermes.voiceremote.state.VoiceTurnUi
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -62,6 +63,8 @@ class VoiceSessionService : Service() {
             ACTION_CANCEL -> handleCancel()
             ACTION_INTERRUPT -> handleInterrupt()
             ACTION_RESET -> handleReset()
+            ACTION_REPLAY_LAST_RESPONSE -> handleReplayLastResponse()
+            ACTION_NEW_SESSION -> handleNewSession()
         }
 
         return START_STICKY
@@ -80,7 +83,7 @@ class VoiceSessionService : Service() {
                 return@launch
             }
             val settings = settingsResult.getOrThrow()
-            _agentProfile.value = settings.agentProfile
+            _agentProfile.value = settings.selectedProfileName
 
             val route = audioRouteManager.preferConfiguredRoute(settings.audioInputPreference)
             _audioRoute.value = route
@@ -202,6 +205,14 @@ class VoiceSessionService : Service() {
                     val response = turnResult.getOrThrow()
                     _transcript.value = response.transcript ?: ""
                     _responseText.value = response.responseText ?: ""
+                    _lastAudioUrl.value = response.audioUrl
+                    _turnHistory.value = _turnHistory.value + VoiceTurnUi(
+                        id = "${System.currentTimeMillis()}_${_turnHistory.value.size}",
+                        userText = _transcript.value,
+                        assistantText = _responseText.value,
+                        audioUrl = response.audioUrl,
+                        createdAt = System.currentTimeMillis()
+                    )
                     
                     val audioUrl = response.audioUrl
                     if (settings.responseMode == ResponseMode.TEXT_AUDIO && !audioUrl.isNullOrEmpty()) {
@@ -243,6 +254,11 @@ class VoiceSessionService : Service() {
                     updateNotification()
                 }
 
+            } catch (e: CancellationException) {
+                if (file.exists()) {
+                    audioRecorder.cleanup(file)
+                }
+                recordedFile = null
             } catch (e: Exception) {
                 _status.value = VoiceSessionStatus.ERROR
                 _errorMessage.value = "Unexpected session error: ${e.message}"
@@ -281,6 +297,7 @@ class VoiceSessionService : Service() {
     }
 
     private fun handleInterrupt() {
+        activeJob?.cancel()
         audioPlayer.stop()
         val settings = settingsRepository.getSettings().getOrNull()
         val sId = _sessionId.value
@@ -298,6 +315,49 @@ class VoiceSessionService : Service() {
         _errorMessage.value = null
         _status.value = VoiceSessionStatus.IDLE
         updateNotification()
+    }
+
+    private fun handleReplayLastResponse() {
+        val audioUrl = _lastAudioUrl.value ?: return
+        activeJob?.cancel()
+        activeJob = serviceScope.launch {
+            val settings = settingsRepository.getSettings().getOrNull() ?: return@launch
+            _status.value = VoiceSessionStatus.SPEAKING
+            updateNotification()
+            val resolvedUrl = resolveAudioUrl(audioUrl, settings.baseUrl)
+            val playResult = audioPlayer.play(resolvedUrl, settings.apiKey)
+            if (playResult.isFailure && _status.value == VoiceSessionStatus.SPEAKING) {
+                _status.value = VoiceSessionStatus.ERROR
+                _errorMessage.value = "Replay failed: ${playResult.exceptionOrNull()?.message}"
+            } else if (_status.value == VoiceSessionStatus.SPEAKING) {
+                _status.value = VoiceSessionStatus.IDLE
+            }
+            updateNotification()
+        }
+    }
+
+    private fun handleNewSession() {
+        activeJob?.cancel()
+        audioPlayer.stop()
+        val settings = settingsRepository.getSettings().getOrNull()
+        val sId = _sessionId.value
+        if (settings != null && !sId.isNullOrEmpty()) {
+            serviceScope.launch {
+                apiClient.endSession(settings, sId)
+            }
+        }
+        _sessionId.value = null
+        clearHistory()
+        _status.value = VoiceSessionStatus.IDLE
+        updateNotification()
+    }
+
+    private fun resolveAudioUrl(audioUrl: String, baseUrl: String): String {
+        return if (audioUrl.startsWith("http://") || audioUrl.startsWith("https://")) {
+            audioUrl
+        } else {
+            "${baseUrl.trim().removeSuffix("/")}/${audioUrl.trim().removePrefix("/")}"
+        }
     }
 
     private fun createNotificationChannel() {
@@ -403,6 +463,8 @@ class VoiceSessionService : Service() {
         const val ACTION_CANCEL = "com.hermes.voiceremote.CANCEL"
         const val ACTION_INTERRUPT = "com.hermes.voiceremote.INTERRUPT"
         const val ACTION_RESET = "com.hermes.voiceremote.RESET"
+        const val ACTION_REPLAY_LAST_RESPONSE = "com.hermes.voiceremote.REPLAY_LAST_RESPONSE"
+        const val ACTION_NEW_SESSION = "com.hermes.voiceremote.NEW_SESSION"
 
         private val _status = MutableStateFlow(VoiceSessionStatus.IDLE)
         val status = _status.asStateFlow()
@@ -410,7 +472,7 @@ class VoiceSessionService : Service() {
         private val _sessionId = MutableStateFlow<String?>(null)
         val sessionId = _sessionId.asStateFlow()
 
-        private val _agentProfile = MutableStateFlow("Vex Volt")
+        private val _agentProfile = MutableStateFlow("Main")
         val agentProfile = _agentProfile.asStateFlow()
 
         private val _isConnected = MutableStateFlow(false)
@@ -425,6 +487,12 @@ class VoiceSessionService : Service() {
         private val _responseText = MutableStateFlow("")
         val responseText = _responseText.asStateFlow()
 
+        private val _lastAudioUrl = MutableStateFlow<String?>(null)
+        val lastAudioUrl = _lastAudioUrl.asStateFlow()
+
+        private val _turnHistory = MutableStateFlow<List<VoiceTurnUi>>(emptyList())
+        val turnHistory = _turnHistory.asStateFlow()
+
         private val _errorMessage = MutableStateFlow<String?>(null)
         val errorMessage = _errorMessage.asStateFlow()
 
@@ -436,9 +504,15 @@ class VoiceSessionService : Service() {
             _isConnected.value = connected
         }
 
+        fun setAgentProfile(profileName: String) {
+            _agentProfile.value = profileName.ifBlank { "Main" }
+        }
+
         fun clearHistory() {
             _transcript.value = ""
             _responseText.value = ""
+            _lastAudioUrl.value = null
+            _turnHistory.value = emptyList()
             _errorMessage.value = null
         }
     }

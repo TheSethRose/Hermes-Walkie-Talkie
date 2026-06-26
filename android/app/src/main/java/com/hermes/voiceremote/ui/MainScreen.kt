@@ -8,9 +8,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -40,6 +39,8 @@ fun MainScreen(
 
     // Test connection loading
     var isTestingConnection by remember { mutableStateOf(false) }
+    var fullTextTitle by remember { mutableStateOf<String?>(null) }
+    var fullTextBody by remember { mutableStateOf("") }
 
     // Launcher for runtime permissions
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -114,12 +115,10 @@ fun MainScreen(
             modifier = modifier
                 .padding(innerPadding)
                 .fillMaxSize()
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Header: Agent Name & Audio Route
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -145,11 +144,10 @@ fun MainScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Center: Large circular Talk button
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
                 contentAlignment = Alignment.Center
             ) {
                 TalkButton(
@@ -158,47 +156,64 @@ fun MainScreen(
                 )
             }
 
-            // Error Message (if any)
-            uiState.errorMessage?.let { msg ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("error_card"),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.error),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Icon(Icons.Default.ErrorOutline, "Error", tint = MaterialTheme.colorScheme.onError)
-                            Text("Error", color = MaterialTheme.colorScheme.onError, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(msg, color = MaterialTheme.colorScheme.onError.copy(alpha = 0.9f), fontSize = 12.sp, lineHeight = 16.sp)
-                    }
-                }
-            }
-
-            // Cards: Transcript and Response
-            Column(
-                modifier = Modifier.fillMaxWidth(),
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                TranscriptCard(transcript = uiState.transcript)
-                ResponseCard(responseText = uiState.responseText)
+                uiState.errorMessage?.let { msg ->
+                    item {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("error_card"),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.error),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(Icons.Default.ErrorOutline, "Error", tint = MaterialTheme.colorScheme.onError)
+                                    Text("Error", color = MaterialTheme.colorScheme.onError, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(msg, color = MaterialTheme.colorScheme.onError.copy(alpha = 0.9f), fontSize = 12.sp, lineHeight = 16.sp)
+                            }
+                        }
+                    }
+                }
+                item {
+                    TranscriptCard(
+                        transcript = uiState.transcript,
+                        onOpenFullText = {
+                            fullTextTitle = "You said"
+                            fullTextBody = uiState.transcript
+                        }
+                    )
+                }
+                item {
+                    ResponseCard(
+                        responseText = uiState.responseText,
+                        audioUrl = uiState.lastAudioUrl,
+                        onPlay = { viewModel.onReplayLastResponse() },
+                        onOpenFullText = {
+                            fullTextTitle = "Hermes responded"
+                            fullTextBody = uiState.responseText
+                        }
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Bottom Actions Bar
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Settings Action
                 TextButton(
                     onClick = onNavigateToSettings,
                     modifier = Modifier.testTag("settings_button")
@@ -208,7 +223,6 @@ fun MainScreen(
                     Text("Settings", fontWeight = FontWeight.SemiBold)
                 }
 
-                // Divider
                 Box(
                     modifier = Modifier
                         .height(24.dp)
@@ -216,7 +230,6 @@ fun MainScreen(
                         .background(MaterialTheme.colorScheme.outline)
                 )
 
-                // Test Connection Action
                 TextButton(
                     onClick = {
                         isTestingConnection = true
@@ -237,7 +250,6 @@ fun MainScreen(
                     }
                 }
 
-                // Divider
                 Box(
                     modifier = Modifier
                         .height(24.dp)
@@ -245,16 +257,23 @@ fun MainScreen(
                         .background(MaterialTheme.colorScheme.outline)
                 )
 
-                // Clear Action
                 TextButton(
-                    onClick = { viewModel.onClear() },
+                    onClick = { viewModel.onNewSession() },
                     modifier = Modifier.testTag("clear_button")
                 ) {
-                    Icon(Icons.Default.Delete, contentDescription = "Clear", modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.AddCircleOutline, contentDescription = "New Session", modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("Clear", fontWeight = FontWeight.SemiBold)
+                    Text("New", fontWeight = FontWeight.SemiBold)
                 }
             }
         }
+    }
+
+    fullTextTitle?.let { title ->
+        FullTextDialog(
+            title = title,
+            text = fullTextBody,
+            onDismiss = { fullTextTitle = null }
+        )
     }
 }

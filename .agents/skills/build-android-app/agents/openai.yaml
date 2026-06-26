@@ -1,0 +1,4 @@
+interface:
+  display_name: "Build Android App"
+  short_description: "Build Kotlin Compose Android apps well"
+  default_prompt: "Use $build-android-app to build a focused Kotlin Jetpack Compose Android app."

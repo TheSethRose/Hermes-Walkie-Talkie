@@ -35,10 +35,13 @@ fun SettingsScreen(
     val context = LocalContext.current
     val currentSettings = remember { viewModel.loadSettings() }
     val storageError by viewModel.storageError.collectAsState()
+    val profiles by viewModel.profiles.collectAsState()
+    val profileLoadError by viewModel.profileLoadError.collectAsState()
 
     var baseUrl by remember { mutableStateOf(currentSettings.baseUrl) }
     var apiKeyInput by remember { mutableStateOf("") }
-    var agentProfile by remember { mutableStateOf(currentSettings.agentProfile) }
+    var selectedProfileId by remember { mutableStateOf(currentSettings.selectedProfileId) }
+    var selectedProfileName by remember { mutableStateOf(currentSettings.selectedProfileName) }
     var responseMode by remember { mutableStateOf(currentSettings.responseMode) }
     var audioInputPref by remember { mutableStateOf(currentSettings.audioInputPreference) }
 
@@ -48,17 +51,30 @@ fun SettingsScreen(
 
     // Error States
     var baseUrlError by remember { mutableStateOf<String?>(null) }
-    var agentProfileError by remember { mutableStateOf<String?>(null) }
     var apiKeyError by remember { mutableStateOf<String?>(null) }
 
     // Dropdown States
     var responseModeExpanded by remember { mutableStateOf(false) }
     var audioPrefExpanded by remember { mutableStateOf(false) }
+    var profileExpanded by remember { mutableStateOf(false) }
+    var isLoadingProfiles by remember { mutableStateOf(false) }
 
     // Test Connection status
     var isTestingConnection by remember { mutableStateOf(false) }
     var testResultText by remember { mutableStateOf<String?>(null) }
     var testResultSuccess by remember { mutableStateOf<Boolean?>(null) }
+
+    LaunchedEffect(profiles) {
+        if (profiles.isNotEmpty()) {
+            val current = profiles.firstOrNull { it.id == selectedProfileId }
+            val preferred = current
+                ?: profiles.firstOrNull { it.id == "main" || it.name.equals("Main", ignoreCase = true) }
+                ?: profiles.firstOrNull { it.isDefault }
+                ?: profiles.first()
+            selectedProfileId = preferred.id
+            selectedProfileName = preferred.name
+        }
+    }
 
     fun validateInputs(): Boolean {
         var isValid = true
@@ -70,13 +86,6 @@ fun SettingsScreen(
             isValid = false
         } else {
             baseUrlError = null
-        }
-
-        if (agentProfile.trim().isEmpty()) {
-            agentProfileError = "Agent profile is required"
-            isValid = false
-        } else {
-            agentProfileError = null
         }
 
         if (apiKeyInput.trim().isEmpty() && !hasSavedKey) {
@@ -192,22 +201,93 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(12.dp)
             )
 
-            // Agent Profile Input
-            OutlinedTextField(
-                value = agentProfile,
-                onValueChange = {
-                    agentProfile = it
-                    agentProfileError = null
+            OutlinedButton(
+                onClick = {
+                    if (baseUrl.trim().isNotEmpty()) {
+                        isLoadingProfiles = true
+                        val resolvedApiKey = if (apiKeyInput.trim().isEmpty()) currentSettings.apiKey else apiKeyInput.trim()
+                        val tempSettings = HermesSettings(
+                            baseUrl = baseUrl.trim(),
+                            apiKey = resolvedApiKey,
+                            selectedProfileId = selectedProfileId.trim(),
+                            selectedProfileName = selectedProfileName.trim(),
+                            responseMode = responseMode,
+                            audioInputPreference = audioInputPref
+                        )
+                        viewModel.loadProfiles(tempSettings) { success, message ->
+                            isLoadingProfiles = false
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 },
-                label = { Text("Agent Profile Name") },
-                isError = agentProfileError != null,
-                supportingText = agentProfileError?.let { { Text(it) } },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("agent_profile_input"),
-                leadingIcon = { Icon(Icons.Default.Person, contentDescription = "Agent Profile") },
-                shape = RoundedCornerShape(12.dp)
-            )
+                modifier = Modifier.fillMaxWidth().testTag("load_profiles_button"),
+                enabled = !isLoadingProfiles
+            ) {
+                if (isLoadingProfiles) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Text(if (profiles.isEmpty()) "Load Profiles" else "Refresh Profiles")
+            }
+
+            if (profiles.isNotEmpty()) {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = selectedProfileName.ifBlank { selectedProfileId },
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Hermes Profile") },
+                        trailingIcon = { Icon(Icons.Default.ArrowDropDown, "Open Dropdown") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = false,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            disabledBorderColor = MaterialTheme.colorScheme.outline,
+                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    Box(
+                        modifier = Modifier.matchParentSize().clickable { profileExpanded = true }
+                    )
+                    DropdownMenu(
+                        expanded = profileExpanded,
+                        onDismissRequest = { profileExpanded = false },
+                        modifier = Modifier.fillMaxWidth(0.9f)
+                    ) {
+                        profiles.forEach { profile ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(profile.name, fontWeight = FontWeight.SemiBold)
+                                        profile.description?.takeIf { it.isNotBlank() }?.let {
+                                            Text(it, style = MaterialTheme.typography.bodySmall)
+                                        }
+                                        Text(
+                                            listOfNotNull(profile.sttLabel, profile.ttsLabel).joinToString(" / "),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedProfileId = profile.id
+                                    selectedProfileName = profile.name
+                                    profileExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            profileLoadError?.let {
+                Text(
+                    text = "Profiles will load after the gateway connection succeeds.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
             Spacer(modifier = Modifier.height(4.dp))
             Text(
@@ -362,7 +442,8 @@ fun SettingsScreen(
                             val tempSettings = HermesSettings(
                                 baseUrl = baseUrl.trim(),
                                 apiKey = resolvedApiKey,
-                                agentProfile = agentProfile.trim(),
+                                selectedProfileId = selectedProfileId.trim(),
+                                selectedProfileName = selectedProfileName.trim(),
                                 responseMode = responseMode,
                                 audioInputPreference = audioInputPref
                             )
@@ -396,7 +477,8 @@ fun SettingsScreen(
                             val updatedSettings = HermesSettings(
                                 baseUrl = baseUrl.trim(),
                                 apiKey = resolvedApiKey,
-                                agentProfile = agentProfile.trim(),
+                                selectedProfileId = selectedProfileId.trim(),
+                                selectedProfileName = selectedProfileName.trim().ifBlank { selectedProfileId.trim() },
                                 responseMode = responseMode,
                                 audioInputPreference = audioInputPref
                             )

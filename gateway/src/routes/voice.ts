@@ -5,15 +5,24 @@ import { requireAuth } from "../auth.js";
 import { createHermesBridge } from "../services/hermesBridge.js";
 import { isAllowedAudioUpload, saveUpload } from "../services/audioStore.js";
 import { SessionStore } from "../services/sessionStore.js";
+import type { ProfileStore } from "../services/profileStore.js";
+import type { PersistentSttWorker } from "../services/sttWorker.js";
 import { transcribeAudio } from "../services/stt.js";
 import { synthesizeSpeech } from "../services/tts.js";
 
 const sessionSchema = z.object({
-  agent: z.string().min(1),
+  profileId: z.string().min(1).optional(),
+  agent: z.string().min(1).optional(),
   responseMode: z.enum(["text", "text_audio"])
 });
 
-export async function voiceRoutes(app: FastifyInstance, config: AppConfig, sessions: SessionStore) {
+export async function voiceRoutes(
+  app: FastifyInstance,
+  config: AppConfig,
+  sessions: SessionStore,
+  profiles: ProfileStore,
+  sttWorker?: PersistentSttWorker
+) {
   const hermes = createHermesBridge(config);
 
   app.post(
@@ -23,9 +32,24 @@ export async function voiceRoutes(app: FastifyInstance, config: AppConfig, sessi
       const parsed = sessionSchema.safeParse(request.body);
       if (!parsed.success) return reply.code(400).send({ error: "Invalid session request" });
 
-      const session = sessions.create(parsed.data.agent, parsed.data.responseMode);
+      const profile = await profiles.resolve(parsed.data.profileId, parsed.data.agent || config.hermesAgent);
+      const session = sessions.create(profile.id, profile.name, parsed.data.responseMode);
+      request.log.info(
+        {
+          requestedProfileId: parsed.data.profileId,
+          requestedAgent: parsed.data.agent,
+          resolvedProfileId: profile.id,
+          resolvedProfileName: profile.name,
+          hermesHome: profile.hermesHome,
+          responseMode: parsed.data.responseMode,
+          sessionId: session.sessionId
+        },
+        "Created voice session"
+      );
       return {
         sessionId: session.sessionId,
+        profileId: session.profileId,
+        profileName: session.profileName,
         agent: session.agent,
         responseMode: session.responseMode
       };
@@ -62,16 +86,34 @@ export async function voiceRoutes(app: FastifyInstance, config: AppConfig, sessi
       if (!saved) return reply.code(400).send({ error: "Audio file is required" });
 
       const parsed = sessionSchema.safeParse({
+        profileId: fields.profileId || session.profileId,
         agent: fields.agent || session.agent,
         responseMode: fields.responseMode || session.responseMode
       });
       if (!parsed.success) return reply.code(400).send({ error: "Invalid turn request" });
 
+      const profile = await profiles.resolve(parsed.data.profileId, parsed.data.agent);
+
       sessions.touch(session.sessionId);
+      request.log.info(
+        {
+          sessionId: session.sessionId,
+          sessionProfileId: session.profileId,
+          requestProfileId: parsed.data.profileId,
+          requestAgent: parsed.data.agent,
+          resolvedProfileId: profile.id,
+          resolvedProfileName: profile.name,
+          hermesHome: profile.hermesHome,
+          responseMode: parsed.data.responseMode,
+          uploadFileName: saved.fileName
+        },
+        "Processing voice turn"
+      );
 
       let transcript: string;
       try {
-        transcript = await transcribeAudio(saved.filePath, saved.fileName, config);
+        transcript = await transcribeAudio(saved.filePath, saved.fileName, config, profile, sttWorker);
+        request.log.info({ sessionId: session.sessionId, transcriptChars: transcript.length }, "Voice turn transcribed");
       } catch (error) {
         request.log.error({ err: error }, "Transcription failed");
         return reply.code(502).send({ error: "Transcription failed" });
@@ -81,20 +123,30 @@ export async function voiceRoutes(app: FastifyInstance, config: AppConfig, sessi
       try {
         hermesResponse = await hermes.sendTurn({
           sessionId: session.sessionId,
-          agent: parsed.data.agent,
-          transcript
+          profileId: profile.id,
+          hermesHome: profile.hermesHome,
+          agent: profile.name,
+          transcript,
+          history: sessions.getHistory(session.sessionId)
         });
+        request.log.info(
+          { sessionId: session.sessionId, responseChars: hermesResponse.responseText.length },
+          "Hermes agent response received"
+        );
       } catch (error) {
         request.log.error({ err: error }, "Hermes agent failed");
         return reply.code(502).send({ error: "Hermes agent failed" });
       }
+
+      sessions.appendTurn(session.sessionId, transcript, hermesResponse.responseText);
 
       if (parsed.data.responseMode === "text") {
         return { transcript, responseText: hermesResponse.responseText };
       }
 
       try {
-        const audio = await synthesizeSpeech(hermesResponse.responseText, config);
+        const audio = await synthesizeSpeech(hermesResponse.responseText, config, profile);
+        request.log.info({ sessionId: session.sessionId, audioUrl: audio?.audioUrl ?? null }, "Voice turn TTS completed");
         return {
           transcript,
           responseText: hermesResponse.responseText,
@@ -118,6 +170,27 @@ export async function voiceRoutes(app: FastifyInstance, config: AppConfig, sessi
     { preHandler: requireAuth(config) },
     async (request, reply) => {
       sessions.cancel(request.params.sessionId);
+      await hermes.cancel(request.params.sessionId);
+      return reply.code(204).send();
+    }
+  );
+
+  app.post<{ Params: { sessionId: string } }>(
+    "/voice/session/:sessionId/reset",
+    { preHandler: requireAuth(config) },
+    async (request, reply) => {
+      const session = sessions.reset(request.params.sessionId);
+      if (!session) return reply.code(404).send({ error: "Session not found" });
+      return reply.code(204).send();
+    }
+  );
+
+  app.post<{ Params: { sessionId: string } }>(
+    "/voice/session/:sessionId/end",
+    { preHandler: requireAuth(config) },
+    async (request, reply) => {
+      const session = sessions.end(request.params.sessionId);
+      if (!session) return reply.code(404).send({ error: "Session not found" });
       await hermes.cancel(request.params.sessionId);
       return reply.code(204).send();
     }

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import com.hermes.voiceremote.network.HermesApiClient
 import com.hermes.voiceremote.network.HermesGatewayRoutes
+import com.hermes.voiceremote.network.HermesProfileDto
 import com.hermes.voiceremote.settings.AudioInputPreference
 import com.hermes.voiceremote.settings.HermesSettings
 import com.hermes.voiceremote.settings.ResponseMode
@@ -43,7 +44,7 @@ class HermesSmokeTest {
     @Test
     fun testApiClientRejectEmptySettings() {
         val client = HermesApiClient()
-        val emptySettings = HermesSettings("", "", "Vex Volt", ResponseMode.TEXT_AUDIO, AudioInputPreference.AUTO)
+        val emptySettings = HermesSettings("", "", "main", "Main", ResponseMode.TEXT_AUDIO, AudioInputPreference.AUTO)
         
         kotlinx.coroutines.runBlocking {
             val healthResult = client.health(emptySettings)
@@ -70,7 +71,25 @@ class HermesSmokeTest {
     fun testHermesGatewayRoutes() {
         assertEquals("/health", HermesGatewayRoutes.HEALTH)
         assertEquals("/voice/session", HermesGatewayRoutes.VOICE_SESSION)
+        assertEquals("/profiles", HermesGatewayRoutes.PROFILES)
         assertEquals("/voice/session/sess_456/turn", HermesGatewayRoutes.voiceTurn("sess_456"))
         assertEquals("/voice/session/sess_456/cancel", HermesGatewayRoutes.cancel("sess_456"))
+        assertEquals("/voice/session/sess_456/reset", HermesGatewayRoutes.reset("sess_456"))
+        assertEquals("/voice/session/sess_456/end", HermesGatewayRoutes.end("sess_456"))
+    }
+
+    @Test
+    fun testProfileDtoModel() {
+        val profile = HermesProfileDto(
+            id = "main",
+            name = "Main",
+            description = "Default Hermes profile",
+            isDefault = true,
+            source = "hermes",
+            sttLabel = "Hermes default",
+            ttsLabel = "Hermes default"
+        )
+        assertEquals("main", profile.id)
+        assertTrue(profile.isDefault)
     }
 }

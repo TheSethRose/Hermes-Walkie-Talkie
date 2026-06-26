@@ -40,6 +40,19 @@ HERMES_CLI_ARGS_TEMPLATE=--agent {agent} --prompt {prompt}
 
 Arguments are passed without a shell. If the local Hermes CLI changes, update only `HERMES_CLI_ARGS_TEMPLATE`.
 
+For follow-up context, the gateway defaults to `HERMES_CONTEXT_MODE=gateway_history`. When the CLI template only contains `{prompt}`, the gateway sends a compact recent-conversation prompt capped by `HERMES_MAX_HISTORY_TURNS`. Templates may also use `{conversation}`, `{sessionId}`, and `{profileId}`.
+
+## Profiles
+
+`GET /profiles` dynamically loads the user's Hermes profiles. In `auto` mode discovery tries:
+
+1. `HERMES_PROFILES_COMMAND` when set.
+2. `HERMES_PROFILES_PATH` when set.
+3. `hermes profile list` and common local Hermes profile files.
+4. `HERMES_DEFAULT_PROFILE` fallback.
+
+Profile discovery is cached for 30 seconds and never blocks server startup. Use `GET /profiles?refresh=true` to force a reload.
+
 ## Mock Mode
 
 For Android integration without external STT/TTS/Hermes:
@@ -98,11 +111,33 @@ Returns:
 }
 ```
 
+### `GET /profiles`
+
+Returns:
+
+```json
+{
+  "profiles": [
+    {
+      "id": "main",
+      "name": "Main",
+      "description": "Default Hermes profile",
+      "isDefault": true,
+      "source": "hermes",
+      "sttLabel": "Hermes default",
+      "ttsLabel": "Hermes default"
+    }
+  ],
+  "defaultProfileId": "main"
+}
+```
+
 ### `POST /voice/session`
 
 ```json
 {
-  "agent": "Vex Volt",
+  "profileId": "main",
+  "agent": "Main",
   "responseMode": "text_audio"
 }
 ```
@@ -113,12 +148,21 @@ Multipart fields:
 
 - `audio`: `.m4a` upload
 - `format`: `m4a`
-- `agent`: selected Hermes profile
+- `profileId`: selected Hermes profile id
+- `agent`: selected Hermes profile name
 - `responseMode`: `text` or `text_audio`
 
 ### `POST /voice/session/:sessionId/cancel`
 
 Returns `204`.
+
+### `POST /voice/session/:sessionId/reset`
+
+Clears turn history for the current session and keeps the selected profile. Returns `204`.
+
+### `POST /voice/session/:sessionId/end`
+
+Invalidates the current session. Returns `204`.
 
 ### `GET /audio/:fileName`
 
@@ -176,13 +220,19 @@ Health:
 curl -H "Authorization: Bearer dev-local-key" http://localhost:8789/health
 ```
 
+Profiles:
+
+```sh
+curl -H "Authorization: Bearer dev-local-key" http://localhost:8789/profiles
+```
+
 Create session:
 
 ```sh
 curl -X POST http://localhost:8789/voice/session \
   -H "Authorization: Bearer dev-local-key" \
   -H "Content-Type: application/json" \
-  -d '{"agent":"Vex Volt","responseMode":"text_audio"}'
+  -d '{"profileId":"main","agent":"Main","responseMode":"text_audio"}'
 ```
 
 Voice turn:
@@ -192,7 +242,8 @@ curl -X POST http://localhost:8789/voice/session/<sessionId>/turn \
   -H "Authorization: Bearer dev-local-key" \
   -F "audio=@sample.m4a" \
   -F "format=m4a" \
-  -F "agent=Vex Volt" \
+  -F "profileId=main" \
+  -F "agent=Main" \
   -F "responseMode=text_audio"
 ```
 
@@ -203,6 +254,31 @@ curl -X POST http://localhost:8789/voice/session/<sessionId>/turn \
   -H "Authorization: Bearer dev-local-key" \
   -F "audio=@sample.m4a" \
   -F "format=m4a" \
-  -F "agent=Vex Volt" \
+  -F "profileId=main" \
+  -F "agent=Main" \
   -F "responseMode=text"
 ```
+
+Reset session:
+
+```sh
+curl -X POST http://localhost:8789/voice/session/<sessionId>/reset \
+  -H "Authorization: Bearer dev-local-key"
+```
+
+End session:
+
+```sh
+curl -X POST http://localhost:8789/voice/session/<sessionId>/end \
+  -H "Authorization: Bearer dev-local-key"
+```
+
+Manual app checks:
+
+- Load profiles in Settings and select a Hermes profile.
+- Send two turns in the same session and confirm the second turn has prior context.
+- Use New Session and confirm the next turn starts fresh.
+- Test text-only mode and text + audio mode.
+- Replay the last response audio from the response card.
+- Interrupt while speaking, then send a follow-up in the same session.
+- Confirm a long response remains preview-only and the Talk button stays visible.
