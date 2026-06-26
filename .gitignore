@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+
+# Secrets and local machine config
+.env
+.env.*
+!.env.example
+local.properties
+*.jks
+*.keystore
+
+# Node/Bun
+node_modules/
+
+# Gateway runtime storage
+gateway/storage/audio/*
+gateway/storage/uploads/*
+!gateway/storage/audio/.gitkeep
+!gateway/storage/uploads/.gitkeep
+
+# Android/Gradle
+.gradle/
+build/
+**/build/
+
+# IDE
+.idea/
+*.iml
+
+# Tool transcripts/history
+.antigravity/
+
+# Kotlin local state
+.kotlin/
