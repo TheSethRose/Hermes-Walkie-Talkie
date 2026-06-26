@@ -9,6 +9,7 @@ import com.hermes.voiceremote.settings.AudioInputPreference
 import com.hermes.voiceremote.settings.HermesSettings
 import com.hermes.voiceremote.settings.ResponseMode
 import com.hermes.voiceremote.settings.SettingsRepository
+import com.hermes.voiceremote.settings.TalkInteractionMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -44,7 +45,7 @@ class HermesSmokeTest {
     @Test
     fun testApiClientRejectEmptySettings() {
         val client = HermesApiClient()
-        val emptySettings = HermesSettings("", "", "main", "Main", ResponseMode.TEXT_AUDIO, AudioInputPreference.AUTO)
+        val emptySettings = HermesSettings("", "", "main", "Main", ResponseMode.TEXT_AUDIO, AudioInputPreference.AUTO, TalkInteractionMode.TAP_TO_TALK)
         
         kotlinx.coroutines.runBlocking {
             val healthResult = client.health(emptySettings)

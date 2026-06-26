@@ -18,6 +18,8 @@ http://localhost:8789
 
 Set `GATEWAY_API_KEY` in `.env` and use the same key in the Android app Settings screen.
 
+Set `GATEWAY_DEBUG=true` only while diagnosing profile, STT/TTS, or session routing issues. It enables verbose internal diagnostics without logging API keys.
+
 ## Hermes CLI
 
 This machine's installed Hermes CLI supports one-shot prompts with:

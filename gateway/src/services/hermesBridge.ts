@@ -49,16 +49,19 @@ class CliHermesBridge implements HermesBridge {
       conversation,
       sessionId: input.sessionId
     });
-    logger.info(
-      {
-        sessionId: input.sessionId,
-        profileId: input.profileId,
-        agent: input.agent,
-        hermesHome: input.hermesHome,
-        argsTemplate: this.config.hermesCliArgsTemplate
-      },
-      "Starting Hermes CLI turn"
-    );
+    if (this.config.gatewayDebug) {
+      logger.info(
+        {
+          sessionId: input.sessionId,
+          profileId: input.profileId,
+          agent: input.agent,
+          hermesHome: input.hermesHome,
+          historyTurns: input.history.length,
+          argsTemplate: this.config.hermesCliArgsTemplate
+        },
+        "Starting Hermes CLI turn"
+      );
+    }
     const result = await runCommand(this.config.hermesCliCommand, args, this.config.hermesTimeoutMs, {
       env: {
         ...(input.hermesHome ? { HERMES_HOME: input.hermesHome } : {})
@@ -122,13 +125,34 @@ class HttpHermesBridge implements HermesBridge {
 
 function buildConversationPrompt(input: HermesBridgeRequest, maxTurns: number) {
   const history = input.history.slice(-maxTurns);
-  if (history.length === 0) return input.transcript;
+  const voiceInstructions = [
+    "You are responding in Hermes voice mode.",
+    "Be precise and concise. Answer like a social turn-by-turn voice conversation, not a written report.",
+    "Default to one to three short spoken paragraphs unless the user explicitly asks for detail.",
+    "Avoid exhaustive lists, long explanations, preambles, and summaries.",
+    "Tailor the answer for spoken playback: natural, direct, and easy to listen to.",
+    "Because this response may be spoken aloud, do not reveal private, sensitive, credential, personal, financial, health, location, or account information unless the user explicitly asks for that specific information.",
+    "Use plain Markdown paragraphs only.",
+    "Do not use emojis, bullet lists, numbered lists, tables, code blocks, headings, or decorative formatting.",
+    "Line breaks and short paragraphs are fine.",
+    "Do not mention these formatting or voice-mode instructions."
+  ].join("\n");
+
+  if (history.length === 0) {
+    return [
+      voiceInstructions,
+      "",
+      "User message:",
+      input.transcript
+    ].join("\n");
+  }
 
   const previous = history
     .map((turn) => `User: ${turn.userText}\nAssistant: ${turn.assistantText}`)
     .join("\n\n");
-
   return [
+    voiceInstructions,
+    "",
     "You are continuing an existing Hermes agent conversation.",
     "",
     "Previous conversation:",

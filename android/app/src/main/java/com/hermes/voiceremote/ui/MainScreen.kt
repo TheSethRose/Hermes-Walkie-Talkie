@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.hermes.voiceremote.settings.AudioInputPreference
 import com.hermes.voiceremote.state.VoiceSessionStatus
 import com.hermes.voiceremote.state.VoiceViewModel
 import com.hermes.voiceremote.ui.components.*
@@ -37,8 +38,6 @@ fun MainScreen(
     val uiState by viewModel.uiState.collectAsState()
     val settings by viewModel.settings.collectAsState()
 
-    // Test connection loading
-    var isTestingConnection by remember { mutableStateOf(false) }
     var fullTextTitle by remember { mutableStateOf<String?>(null) }
     var fullTextBody by remember { mutableStateOf("") }
 
@@ -49,20 +48,13 @@ fun MainScreen(
         val micGranted = permissions[Manifest.permission.RECORD_AUDIO] 
             ?: (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
         if (micGranted) {
-            viewModel.onTalkButtonPressed()
+            viewModel.onTalkPressStart()
         } else {
             Toast.makeText(context, "Microphone permission is required to record audio.", Toast.LENGTH_LONG).show()
         }
     }
 
-    // Function to check and request permissions
-    fun handleTalkButtonTap() {
-        if (uiState.status != VoiceSessionStatus.IDLE) {
-            // Stop, cancel, interrupt, reset don't need permissions
-            viewModel.onTalkButtonPressed()
-            return
-        }
-
+    fun startRecordingWithPermissions() {
         val requiredPermissions = mutableListOf<String>()
         
         // Microphone is strictly mandatory to start recording
@@ -72,8 +64,8 @@ fun MainScreen(
         
         // Bluetooth (S+): only request if configuration uses Bluetooth
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (settings.audioInputPreference == com.hermes.voiceremote.settings.AudioInputPreference.AUTO ||
-                settings.audioInputPreference == com.hermes.voiceremote.settings.AudioInputPreference.BLUETOOTH_HEADSET) {
+            if (settings.audioInputPreference == AudioInputPreference.AUTO ||
+                settings.audioInputPreference == AudioInputPreference.BLUETOOTH_HEADSET) {
                 if (ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
                     requiredPermissions.add(Manifest.permission.BLUETOOTH_CONNECT)
                 }
@@ -88,10 +80,28 @@ fun MainScreen(
         }
 
         if (requiredPermissions.isEmpty()) {
-            viewModel.onTalkButtonPressed()
+            viewModel.onTalkPressStart()
         } else {
             permissionLauncher.launch(requiredPermissions.toTypedArray())
         }
+    }
+
+    fun handleTalkTap() {
+        if (uiState.status == VoiceSessionStatus.IDLE) {
+            startRecordingWithPermissions()
+        } else {
+            viewModel.onTalkButtonPressed()
+        }
+    }
+
+    fun handlePushTalkStart() {
+        if (viewModel.uiState.value.status == VoiceSessionStatus.IDLE) {
+            startRecordingWithPermissions()
+        }
+    }
+
+    fun handlePushTalkEnd() {
+        viewModel.onTalkPressEnd()
     }
 
     Scaffold(
@@ -103,7 +113,7 @@ fun MainScreen(
                 ),
                 actions = {
                     StatusPill(
-                        isConnected = uiState.isConnected,
+                        connectionStatus = uiState.connectionStatus,
                         status = uiState.status,
                         modifier = Modifier.padding(end = 8.dp)
                     )
@@ -139,7 +149,7 @@ fun MainScreen(
                     )
                 }
 
-                AudioRouteLabel(route = uiState.audioRoute)
+                AudioRouteLabel(route = uiState.audioRoute, onClick = onNavigateToSettings)
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -152,7 +162,10 @@ fun MainScreen(
             ) {
                 TalkButton(
                     status = uiState.status,
-                    onClick = { handleTalkButtonTap() }
+                    talkInteractionMode = settings.talkInteractionMode,
+                    onTap = { handleTalkTap() },
+                    onPressStart = { handlePushTalkStart() },
+                    onPressEnd = { handlePushTalkEnd() }
                 )
             }
 
@@ -231,23 +244,12 @@ fun MainScreen(
                 )
 
                 TextButton(
-                    onClick = {
-                        isTestingConnection = true
-                        viewModel.onTestConnection { success, message ->
-                            isTestingConnection = false
-                            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                        }
-                    },
-                    modifier = Modifier.testTag("test_connection_action"),
-                    enabled = !isTestingConnection
+                    onClick = onNavigateToSettings,
+                    modifier = Modifier.testTag("agent_button")
                 ) {
-                    if (isTestingConnection) {
-                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Icon(Icons.Default.NetworkCheck, contentDescription = "Test Connection", modifier = Modifier.size(20.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Test Connection", fontWeight = FontWeight.SemiBold)
-                    }
+                    Icon(Icons.Default.Person, contentDescription = "Agent", modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Agent", fontWeight = FontWeight.SemiBold)
                 }
 
                 Box(
@@ -259,7 +261,7 @@ fun MainScreen(
 
                 TextButton(
                     onClick = { viewModel.onNewSession() },
-                    modifier = Modifier.testTag("clear_button")
+                    modifier = Modifier.testTag("new_session_button")
                 ) {
                     Icon(Icons.Default.AddCircleOutline, contentDescription = "New Session", modifier = Modifier.size(20.dp))
                     Spacer(modifier = Modifier.width(6.dp))

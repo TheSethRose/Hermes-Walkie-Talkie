@@ -16,6 +16,7 @@ import com.hermes.voiceremote.network.HermesApiClient
 import com.hermes.voiceremote.settings.AudioRoute
 import com.hermes.voiceremote.settings.ResponseMode
 import com.hermes.voiceremote.settings.SettingsRepository
+import com.hermes.voiceremote.state.GatewayConnectionStatus
 import com.hermes.voiceremote.state.VoiceSessionStatus
 import com.hermes.voiceremote.state.VoiceTurnUi
 import kotlinx.coroutines.*
@@ -159,14 +160,15 @@ class VoiceSessionService : Service() {
                     if (sessionResult.isSuccess) {
                         sId = sessionResult.getOrThrow()
                         _sessionId.value = sId
-                        _isConnected.value = true
+                        setIsConnected(true)
                     } else {
                         val ex = sessionResult.exceptionOrNull()
                         if (ex?.message?.contains("Unauthorized", ignoreCase = true) == true) {
-                            _isConnected.value = false
+                            setGatewayConnection(GatewayConnectionStatus.ERROR, errorMessage = "Unauthorized")
                             _status.value = VoiceSessionStatus.ERROR
                             _errorMessage.value = "Unauthorized: Invalid Base URL or API Key."
                         } else {
+                            setGatewayConnection(GatewayConnectionStatus.OFFLINE, errorMessage = ex?.message)
                             _status.value = VoiceSessionStatus.ERROR
                             _errorMessage.value = "Failed to open gateway session: ${ex?.message}"
                         }
@@ -190,7 +192,7 @@ class VoiceSessionService : Service() {
                     if (sessionResult.isSuccess) {
                         sId = sessionResult.getOrThrow()
                         _sessionId.value = sId
-                        _isConnected.value = true
+                        setIsConnected(true)
                         turnResult = apiClient.submitTurn(settings, sId, file)
                     } else {
                         val sessionEx = sessionResult.exceptionOrNull()
@@ -241,10 +243,11 @@ class VoiceSessionService : Service() {
                 } else {
                     val ex = turnResult.exceptionOrNull()
                     if (ex?.message?.contains("Unauthorized", ignoreCase = true) == true) {
-                        _isConnected.value = false
+                        setGatewayConnection(GatewayConnectionStatus.ERROR, errorMessage = "Unauthorized")
                         _status.value = VoiceSessionStatus.ERROR
                         _errorMessage.value = "Unauthorized: Invalid API Key."
                     } else {
+                        setGatewayConnection(GatewayConnectionStatus.OFFLINE, errorMessage = ex?.message)
                         _status.value = VoiceSessionStatus.ERROR
                         _errorMessage.value = "Failed to upload voice turn: ${ex?.message}"
                     }
@@ -478,6 +481,18 @@ class VoiceSessionService : Service() {
         private val _isConnected = MutableStateFlow(false)
         val isConnected = _isConnected.asStateFlow()
 
+        private val _connectionStatus = MutableStateFlow(GatewayConnectionStatus.OFFLINE)
+        val connectionStatus = _connectionStatus.asStateFlow()
+
+        private val _lastHealthCheckedAt = MutableStateFlow<Long?>(null)
+        val lastHealthCheckedAt = _lastHealthCheckedAt.asStateFlow()
+
+        private val _gatewayLatencyMs = MutableStateFlow<Long?>(null)
+        val gatewayLatencyMs = _gatewayLatencyMs.asStateFlow()
+
+        private val _connectionErrorMessage = MutableStateFlow<String?>(null)
+        val connectionErrorMessage = _connectionErrorMessage.asStateFlow()
+
         private val _audioRoute = MutableStateFlow(AudioRoute.PHONE)
         val audioRoute = _audioRoute.asStateFlow()
 
@@ -502,6 +517,23 @@ class VoiceSessionService : Service() {
 
         fun setIsConnected(connected: Boolean) {
             _isConnected.value = connected
+            _connectionStatus.value = if (connected) GatewayConnectionStatus.ONLINE else GatewayConnectionStatus.OFFLINE
+            if (connected) {
+                _connectionErrorMessage.value = null
+            }
+        }
+
+        fun setGatewayConnection(
+            status: GatewayConnectionStatus,
+            checkedAt: Long? = null,
+            latencyMs: Long? = null,
+            errorMessage: String? = null
+        ) {
+            _connectionStatus.value = status
+            _isConnected.value = status == GatewayConnectionStatus.ONLINE
+            checkedAt?.let { _lastHealthCheckedAt.value = it }
+            _gatewayLatencyMs.value = latencyMs
+            _connectionErrorMessage.value = errorMessage
         }
 
         fun setAgentProfile(profileName: String) {

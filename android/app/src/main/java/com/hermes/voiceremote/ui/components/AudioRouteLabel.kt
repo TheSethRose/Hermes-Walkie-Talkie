@@ -1,5 +1,6 @@
 package com.hermes.voiceremote.ui.components
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,7 +21,8 @@ import com.hermes.voiceremote.settings.AudioRoute
 @Composable
 fun AudioRouteLabel(
     route: AudioRoute,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null
 ) {
     val icon = when (route) {
         AudioRoute.BLUETOOTH_HEADSET -> Icons.Default.Bluetooth
@@ -38,6 +40,8 @@ fun AudioRouteLabel(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .defaultMinSize(minHeight = 48.dp)
             .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)

@@ -11,6 +11,12 @@ enum class AudioInputPreference {
     BLUETOOTH_HEADSET
 }
 
+enum class TalkInteractionMode {
+    TAP_TO_TALK,
+    PUSH_TO_TALK,
+    ALWAYS_LISTENING
+}
+
 enum class AudioRoute {
     BLUETOOTH_HEADSET,
     PHONE,
@@ -23,5 +29,6 @@ data class HermesSettings(
     val selectedProfileId: String,
     val selectedProfileName: String,
     val responseMode: ResponseMode,
-    val audioInputPreference: AudioInputPreference
+    val audioInputPreference: AudioInputPreference,
+    val talkInteractionMode: TalkInteractionMode
 )

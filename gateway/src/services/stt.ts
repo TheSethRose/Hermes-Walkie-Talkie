@@ -35,13 +35,15 @@ export async function transcribeAudio(
 }
 
 async function transcribeWithHermesWorker(filePath: string, profile: HermesProfile | undefined, worker: PersistentSttWorker) {
-  logger.info({ profileId: profile?.id, profileName: profile?.name, hermesHome: profile?.hermesHome }, "Starting Hermes STT worker request");
+  if (worker.debugEnabled) {
+    logger.info({ profileId: profile?.id, profileName: profile?.name, hermesHome: profile?.hermesHome }, "Starting Hermes STT worker request");
+  }
   const body = await worker.transcribe(filePath, profile);
   if (body.success !== true || typeof body.transcript !== "string") {
     logger.error({ error: body.error }, "Hermes STT worker returned failure");
     throw new Error("Hermes STT returned failure");
   }
-  logger.info({ providerOutput: body.success, transcriptChars: body.transcript.length }, "Hermes STT worker succeeded");
+  if (worker.debugEnabled) logger.info({ providerOutput: body.success, transcriptChars: body.transcript.length }, "Hermes STT worker succeeded");
   return body.transcript;
 }
 
@@ -73,16 +75,18 @@ async function transcribeWithHermes(filePath: string, config: AppConfig, profile
     "print(json.dumps(result))"
   ].join("\n");
 
-  logger.info(
-    {
-      profileId: profile?.id,
-      profileName: profile?.name,
-      hermesHome: profile?.hermesHome,
-      hermesPython: config.hermesSttPython,
-      hermesPythonPath: config.hermesPythonPath
-    },
-    "Starting Hermes STT"
-  );
+  if (config.gatewayDebug) {
+    logger.info(
+      {
+        profileId: profile?.id,
+        profileName: profile?.name,
+        hermesHome: profile?.hermesHome,
+        hermesPython: config.hermesSttPython,
+        hermesPythonPath: config.hermesPythonPath
+      },
+      "Starting Hermes STT"
+    );
+  }
 
   const result = await runCommand(
     config.hermesSttPython,
@@ -99,7 +103,7 @@ async function transcribeWithHermes(filePath: string, config: AppConfig, profile
     throw new Error("Hermes STT failed");
   }
 
-  if (result.stderr.trim()) {
+  if (config.gatewayDebug && result.stderr.trim()) {
     logger.info({ stderr: result.stderr.slice(0, 4000) }, "Hermes STT diagnostics");
   }
 
@@ -109,7 +113,7 @@ async function transcribeWithHermes(filePath: string, config: AppConfig, profile
     throw new Error("Hermes STT returned failure");
   }
 
-  logger.info({ providerOutput: body.success, transcriptChars: body.transcript.length }, "Hermes STT succeeded");
+  if (config.gatewayDebug) logger.info({ providerOutput: body.success, transcriptChars: body.transcript.length }, "Hermes STT succeeded");
   return body.transcript;
 }
 

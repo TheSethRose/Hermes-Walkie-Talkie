@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -25,10 +26,10 @@ fun ResponseCard(
         accentColor = MaterialTheme.colorScheme.secondary,
         maxLines = 5,
         onClick = onOpenFullText,
-        modifier = modifier,
+        modifier = modifier.testTag("response_card"),
         trailingContent = {
             if (!audioUrl.isNullOrEmpty()) {
-                IconButton(onClick = onPlay, modifier = Modifier.size(36.dp)) {
+                IconButton(onClick = onPlay, modifier = Modifier.size(48.dp)) {
                     Icon(Icons.Default.PlayArrow, contentDescription = "Replay response")
                 }
             }

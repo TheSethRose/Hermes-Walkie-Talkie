@@ -1,6 +1,7 @@
 package com.hermes.voiceremote.ui
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -12,7 +13,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.sp
 import com.hermes.voiceremote.settings.AudioInputPreference
 import com.hermes.voiceremote.settings.HermesSettings
 import com.hermes.voiceremote.settings.ResponseMode
+import com.hermes.voiceremote.settings.TalkInteractionMode
 import com.hermes.voiceremote.state.VoiceViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,26 +44,24 @@ fun SettingsScreen(
     var selectedProfileId by remember { mutableStateOf(currentSettings.selectedProfileId) }
     var selectedProfileName by remember { mutableStateOf(currentSettings.selectedProfileName) }
     var responseMode by remember { mutableStateOf(currentSettings.responseMode) }
+    var talkInteractionMode by remember { mutableStateOf(currentSettings.talkInteractionMode) }
     var audioInputPref by remember { mutableStateOf(currentSettings.audioInputPreference) }
 
     val hasSavedKey = currentSettings.apiKey.isNotEmpty()
-    var apiKeyPlaceholder = if (hasSavedKey) "•••••••••••••••• (Saved)" else "Enter API Key"
+    val apiKeyPlaceholder = if (hasSavedKey) "•••••••• (Key saved)" else "Enter API Key"
     var showApiKey by remember { mutableStateOf(false) }
 
     // Error States
     var baseUrlError by remember { mutableStateOf<String?>(null) }
     var apiKeyError by remember { mutableStateOf<String?>(null) }
+    var showDiscardDialog by remember { mutableStateOf(false) }
 
     // Dropdown States
     var responseModeExpanded by remember { mutableStateOf(false) }
+    var talkModeExpanded by remember { mutableStateOf(false) }
     var audioPrefExpanded by remember { mutableStateOf(false) }
     var profileExpanded by remember { mutableStateOf(false) }
     var isLoadingProfiles by remember { mutableStateOf(false) }
-
-    // Test Connection status
-    var isTestingConnection by remember { mutableStateOf(false) }
-    var testResultText by remember { mutableStateOf<String?>(null) }
-    var testResultSuccess by remember { mutableStateOf<Boolean?>(null) }
 
     LaunchedEffect(profiles) {
         if (profiles.isNotEmpty()) {
@@ -73,6 +72,24 @@ fun SettingsScreen(
                 ?: profiles.first()
             selectedProfileId = preferred.id
             selectedProfileName = preferred.name
+        }
+    }
+
+    fun hasUnsavedChanges(): Boolean {
+        return baseUrl.trim() != currentSettings.baseUrl ||
+            apiKeyInput.trim().isNotEmpty() ||
+            selectedProfileId != currentSettings.selectedProfileId ||
+            selectedProfileName != currentSettings.selectedProfileName ||
+            responseMode != currentSettings.responseMode ||
+            talkInteractionMode != currentSettings.talkInteractionMode ||
+            audioInputPref != currentSettings.audioInputPreference
+    }
+
+    fun navigateBackOrConfirmDiscard() {
+        if (hasUnsavedChanges()) {
+            showDiscardDialog = true
+        } else {
+            onBack()
         }
     }
 
@@ -98,13 +115,40 @@ fun SettingsScreen(
         return isValid
     }
 
+    BackHandler(enabled = viewModel.hasValidSettings()) {
+        navigateBackOrConfirmDiscard()
+    }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text("Discard changes?") },
+            text = { Text("You have unsaved settings changes. If you go back now, they will be discarded.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDiscardDialog = false
+                        onBack()
+                    }
+                ) {
+                    Text("Discard")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) {
+                    Text("Keep editing")
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Settings", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     if (viewModel.hasValidSettings()) {
-                        IconButton(onClick = onBack) {
+                        IconButton(onClick = { navigateBackOrConfirmDiscard() }) {
                             Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back")
                         }
                     }
@@ -212,7 +256,8 @@ fun SettingsScreen(
                             selectedProfileId = selectedProfileId.trim(),
                             selectedProfileName = selectedProfileName.trim(),
                             responseMode = responseMode,
-                            audioInputPreference = audioInputPref
+                            audioInputPreference = audioInputPref,
+                            talkInteractionMode = talkInteractionMode
                         )
                         viewModel.loadProfiles(tempSettings) { success, message ->
                             isLoadingProfiles = false
@@ -347,6 +392,69 @@ fun SettingsScreen(
                 }
             }
 
+            // Talk Interaction Mode Dropdown
+            Box(modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = when (talkInteractionMode) {
+                        TalkInteractionMode.TAP_TO_TALK -> "Tap to talk"
+                        TalkInteractionMode.PUSH_TO_TALK -> "Push to talk"
+                        TalkInteractionMode.ALWAYS_LISTENING -> "Always listening"
+                    },
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Talk Interaction Mode") },
+                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, "Open Dropdown") },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = false,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        disabledBorderColor = MaterialTheme.colorScheme.outline,
+                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                        disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clickable { talkModeExpanded = true }
+                        .testTag("talk_interaction_mode_dropdown")
+                )
+                DropdownMenu(
+                    expanded = talkModeExpanded,
+                    onDismissRequest = { talkModeExpanded = false },
+                    modifier = Modifier.fillMaxWidth(0.9f)
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Tap to talk") },
+                        onClick = {
+                            talkInteractionMode = TalkInteractionMode.TAP_TO_TALK
+                            talkModeExpanded = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Push to talk") },
+                        onClick = {
+                            talkInteractionMode = TalkInteractionMode.PUSH_TO_TALK
+                            talkModeExpanded = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("Always listening")
+                                Text(
+                                    "Coming soon: streaming conversation with interruption support.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        },
+                        onClick = {},
+                        enabled = false
+                    )
+                }
+            }
+
             // Audio Route Preferences Dropdown
             Box(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
@@ -406,101 +514,37 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Health Status Box if any
-            testResultText?.let { text ->
-                val cardColor = if (testResultSuccess == true) Color(0xFF1B5E20) else Color(0xFFB71C1C)
-                val textColor = Color.White
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = cardColor),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = text,
-                        color = textColor,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(12.dp),
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            }
+            Button(
+                onClick = {
+                    if (validateInputs()) {
+                        val resolvedApiKey = if (apiKeyInput.trim().isEmpty()) currentSettings.apiKey else apiKeyInput.trim()
+                        val updatedSettings = HermesSettings(
+                            baseUrl = baseUrl.trim(),
+                            apiKey = resolvedApiKey,
+                            selectedProfileId = selectedProfileId.trim(),
+                            selectedProfileName = selectedProfileName.trim().ifBlank { selectedProfileId.trim() },
+                            responseMode = responseMode,
+                            audioInputPreference = audioInputPref,
+                            talkInteractionMode = talkInteractionMode
+                        )
 
-            // Actions Buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                // Test Connection Button
-                OutlinedButton(
-                    onClick = {
-                        if (validateInputs()) {
-                            isTestingConnection = true
-                            testResultText = "Testing connection to health endpoint..."
-                            testResultSuccess = null
-                            
-                            val resolvedApiKey = if (apiKeyInput.trim().isEmpty()) currentSettings.apiKey else apiKeyInput.trim()
-                            val tempSettings = HermesSettings(
-                                baseUrl = baseUrl.trim(),
-                                apiKey = resolvedApiKey,
-                                selectedProfileId = selectedProfileId.trim(),
-                                selectedProfileName = selectedProfileName.trim(),
-                                responseMode = responseMode,
-                                audioInputPreference = audioInputPref
-                            )
-                            
-                            viewModel.onTestConnection(tempSettings) { success, message ->
-                                isTestingConnection = false
-                                testResultSuccess = success
-                                testResultText = message
-                            }
+                        val success = viewModel.saveSettings(updatedSettings)
+                        if (success) {
+                            Toast.makeText(context, "Settings saved securely!", Toast.LENGTH_SHORT).show()
+                            onBack()
+                        } else {
+                            Toast.makeText(context, "Error saving settings securely.", Toast.LENGTH_SHORT).show()
                         }
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(50.dp)
-                        .testTag("test_connection_button"),
-                    shape = RoundedCornerShape(24.dp),
-                    enabled = !isTestingConnection
-                ) {
-                    if (isTestingConnection) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                    } else {
-                        Text("Test Connection", fontSize = 14.sp)
                     }
-                }
-
-                // Save Button
-                Button(
-                    onClick = {
-                        if (validateInputs()) {
-                            val resolvedApiKey = if (apiKeyInput.trim().isEmpty()) currentSettings.apiKey else apiKeyInput.trim()
-                            val updatedSettings = HermesSettings(
-                                baseUrl = baseUrl.trim(),
-                                apiKey = resolvedApiKey,
-                                selectedProfileId = selectedProfileId.trim(),
-                                selectedProfileName = selectedProfileName.trim().ifBlank { selectedProfileId.trim() },
-                                responseMode = responseMode,
-                                audioInputPreference = audioInputPref
-                            )
-
-                            val success = viewModel.saveSettings(updatedSettings)
-                            if (success) {
-                                Toast.makeText(context, "Settings saved securely!", Toast.LENGTH_SHORT).show()
-                                onBack()
-                            } else {
-                                Toast.makeText(context, "Error saving settings securely.", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(50.dp)
-                        .testTag("save_settings_button"),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Text("Save Settings", fontSize = 14.sp)
-                }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+                    .testTag("save_settings_button"),
+                shape = RoundedCornerShape(24.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Text("Save Settings", fontSize = 14.sp)
             }
         }
     }

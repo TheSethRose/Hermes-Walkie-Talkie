@@ -11,14 +11,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hermes.voiceremote.state.GatewayConnectionStatus
 import com.hermes.voiceremote.state.VoiceSessionStatus
+import com.hermes.voiceremote.ui.theme.HermesSuccess
 
 @Composable
 fun StatusPill(
-    isConnected: Boolean,
+    connectionStatus: GatewayConnectionStatus,
     status: VoiceSessionStatus,
     modifier: Modifier = Modifier
 ) {
@@ -37,7 +40,8 @@ fun StatusPill(
         modifier = modifier
             .clip(RoundedCornerShape(24.dp))
             .background(MaterialTheme.colorScheme.surfaceColorAtElevation(4.dp))
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .padding(horizontal = 14.dp, vertical = 6.dp)
+            .testTag("status_pill"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -47,19 +51,29 @@ fun StatusPill(
                              status == VoiceSessionStatus.SPEAKING
 
         val (dotColor, textColor, textValue) = when {
-            isSessionActive -> Triple(
-                Color(0xFFFFD600).copy(alpha = dotAlpha),
-                Color(0xFFFFD600),
-                "ACTIVE"
+            status == VoiceSessionStatus.ERROR -> Triple(
+                MaterialTheme.colorScheme.error.copy(alpha = dotAlpha),
+                MaterialTheme.colorScheme.error,
+                "ERROR"
             )
-            isConnected -> Triple(
-                Color(0xFF22C55E).copy(alpha = dotAlpha),
-                Color(0xFF22C55E),
+            connectionStatus == GatewayConnectionStatus.CONNECTING -> Triple(
+                MaterialTheme.colorScheme.primary.copy(alpha = dotAlpha),
+                MaterialTheme.colorScheme.primary,
+                "CONNECTING"
+            )
+            connectionStatus == GatewayConnectionStatus.ONLINE -> Triple(
+                if (isSessionActive) MaterialTheme.colorScheme.primary.copy(alpha = dotAlpha) else HermesSuccess.copy(alpha = dotAlpha),
+                if (isSessionActive) MaterialTheme.colorScheme.primary else HermesSuccess,
                 "ONLINE"
             )
+            connectionStatus == GatewayConnectionStatus.ERROR -> Triple(
+                MaterialTheme.colorScheme.error.copy(alpha = dotAlpha),
+                MaterialTheme.colorScheme.error,
+                "ERROR"
+            )
             else -> Triple(
-                Color(0xFF757575),
-                Color(0xFFA8A8A8),
+                MaterialTheme.colorScheme.error.copy(alpha = dotAlpha),
+                MaterialTheme.colorScheme.error,
                 "OFFLINE"
             )
         }
@@ -80,13 +94,6 @@ fun StatusPill(
             letterSpacing = 0.5.sp
         )
 
-        Divider(
-            modifier = Modifier
-                .height(12.dp)
-                .width(1.dp),
-            color = MaterialTheme.colorScheme.outline
-        )
-
         val statusColor = when (status) {
             VoiceSessionStatus.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
             VoiceSessionStatus.LISTENING -> MaterialTheme.colorScheme.error
@@ -96,13 +103,31 @@ fun StatusPill(
             VoiceSessionStatus.ERROR -> MaterialTheme.colorScheme.error
         }
 
-        Text(
-            text = status.name,
-            color = statusColor,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.ExtraBold,
-            letterSpacing = 0.5.sp
-        )
+        val statusText = when (status) {
+            VoiceSessionStatus.IDLE -> "IDLE"
+            VoiceSessionStatus.LISTENING -> "LISTENING"
+            VoiceSessionStatus.UPLOADING -> "SENDING"
+            VoiceSessionStatus.THINKING -> "THINKING"
+            VoiceSessionStatus.SPEAKING -> "SPEAKING"
+            VoiceSessionStatus.ERROR -> "ERROR"
+        }
+
+        if (connectionStatus == GatewayConnectionStatus.ONLINE && status != VoiceSessionStatus.ERROR) {
+            VerticalDivider(
+                modifier = Modifier
+                    .height(12.dp)
+                    .width(1.dp),
+                color = MaterialTheme.colorScheme.outline
+            )
+
+            Text(
+                text = statusText,
+                color = statusColor,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 0.5.sp
+            )
+        }
     }
 }
 

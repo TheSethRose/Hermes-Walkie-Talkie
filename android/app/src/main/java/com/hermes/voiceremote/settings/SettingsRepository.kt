@@ -57,6 +57,13 @@ class SettingsRepository(private val context: Context) {
                 AudioInputPreference.AUTO
             }
 
+            val talkInteractionModeStr = prefs.getString(KEY_TALK_INTERACTION_MODE, TalkInteractionMode.TAP_TO_TALK.name)
+            val talkInteractionMode = try {
+                TalkInteractionMode.valueOf(talkInteractionModeStr ?: TalkInteractionMode.TAP_TO_TALK.name)
+            } catch (e: Exception) {
+                TalkInteractionMode.TAP_TO_TALK
+            }
+
             Result.success(
                 HermesSettings(
                     baseUrl = baseUrl,
@@ -64,7 +71,8 @@ class SettingsRepository(private val context: Context) {
                     selectedProfileId = selectedProfileId,
                     selectedProfileName = selectedProfileName,
                     responseMode = responseMode,
-                    audioInputPreference = audioPref
+                    audioInputPreference = audioPref,
+                    talkInteractionMode = talkInteractionMode
                 )
             )
         } catch (e: Exception) {
@@ -87,6 +95,7 @@ class SettingsRepository(private val context: Context) {
                 .putString(KEY_SELECTED_PROFILE_NAME, settings.selectedProfileName.trim())
                 .putString(KEY_RESPONSE_MODE, settings.responseMode.name)
                 .putString(KEY_AUDIO_INPUT_PREF, settings.audioInputPreference.name)
+                .putString(KEY_TALK_INTERACTION_MODE, settings.talkInteractionMode.name)
                 .commit()
             if (success) {
                 Result.success(Unit)
@@ -117,5 +126,6 @@ class SettingsRepository(private val context: Context) {
         private const val KEY_SELECTED_PROFILE_NAME = "selected_profile_name"
         private const val KEY_RESPONSE_MODE = "response_mode"
         private const val KEY_AUDIO_INPUT_PREF = "audio_input_pref"
+        private const val KEY_TALK_INTERACTION_MODE = "talk_interaction_mode"
     }
 }

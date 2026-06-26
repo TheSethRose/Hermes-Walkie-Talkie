@@ -13,8 +13,12 @@ import com.hermes.voiceremote.settings.AudioRoute
 import com.hermes.voiceremote.settings.HermesSettings
 import com.hermes.voiceremote.settings.ResponseMode
 import com.hermes.voiceremote.settings.SettingsRepository
+import com.hermes.voiceremote.settings.TalkInteractionMode
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlin.system.measureTimeMillis
 
 class VoiceViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -23,7 +27,8 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
     private val apiClient = HermesApiClient()
     private val audioRouteManager = AudioRouteManager(application)
 
-    private val defaultSettings = HermesSettings("", "", "main", "Main", ResponseMode.TEXT_AUDIO, AudioInputPreference.AUTO)
+    private val defaultSettings = HermesSettings("", "", "main", "Main", ResponseMode.TEXT_AUDIO, AudioInputPreference.AUTO, TalkInteractionMode.TAP_TO_TALK)
+    private var healthCheckJob: Job? = null
 
     private val _settings = MutableStateFlow(
         settingsRepository.getSettings().getOrDefault(defaultSettings)
@@ -45,6 +50,10 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
             VoiceSessionService.sessionId,
             VoiceSessionService.agentProfile,
             VoiceSessionService.isConnected,
+            VoiceSessionService.connectionStatus,
+            VoiceSessionService.lastHealthCheckedAt,
+            VoiceSessionService.gatewayLatencyMs,
+            VoiceSessionService.connectionErrorMessage,
             VoiceSessionService.audioRoute,
             VoiceSessionService.transcript,
             VoiceSessionService.responseText,
@@ -57,13 +66,17 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
         val sessionId = array[1] as? String
         val agentProfile = array[2] as String
         val isConnected = array[3] as Boolean
-        val audioRoute = array[4] as AudioRoute
-        val transcript = array[5] as String
-        val responseText = array[6] as String
-        val lastAudioUrl = array[7] as? String
+        val connectionStatus = array[4] as GatewayConnectionStatus
+        val lastHealthCheckedAt = array[5] as? Long
+        val gatewayLatencyMs = array[6] as? Long
+        val connectionErrorMessage = array[7] as? String
+        val audioRoute = array[8] as AudioRoute
+        val transcript = array[9] as String
+        val responseText = array[10] as String
+        val lastAudioUrl = array[11] as? String
         @Suppress("UNCHECKED_CAST")
-        val turnHistory = array[8] as List<VoiceTurnUi>
-        val errorMessage = array[9] as? String
+        val turnHistory = array[12] as List<VoiceTurnUi>
+        val errorMessage = array[13] as? String
 
         val isBusy = status == VoiceSessionStatus.UPLOADING ||
                      status == VoiceSessionStatus.THINKING ||
@@ -74,6 +87,10 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
             sessionId = sessionId,
             agentProfile = agentProfile,
             isConnected = isConnected,
+            connectionStatus = connectionStatus,
+            lastHealthCheckedAt = lastHealthCheckedAt,
+            gatewayLatencyMs = gatewayLatencyMs,
+            connectionErrorMessage = connectionErrorMessage,
             audioRoute = audioRoute,
             transcript = transcript,
             responseText = responseText,
@@ -91,6 +108,7 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         loadSettings()
+        startPeriodicHealthChecks()
     }
 
     fun loadSettings(): HermesSettings {
@@ -100,14 +118,10 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
         _settings.value = currentSettings
         VoiceSessionService.setAgentProfile(currentSettings.selectedProfileName)
         
-        // Asynchronously check health on start to update the connection state dot
         viewModelScope.launch {
-            if (currentSettings.baseUrl.isNotEmpty() && currentSettings.apiKey.isNotEmpty()) {
-                val checkResult = apiClient.health(currentSettings)
-                VoiceSessionService.setIsConnected(checkResult.isSuccess)
-                if (checkResult.isSuccess) {
-                    loadProfiles(currentSettings)
-                }
+            val connected = refreshConnectionHealth(currentSettings)
+            if (connected) {
+                loadProfiles(currentSettings)
             }
         }
         return currentSettings
@@ -123,9 +137,7 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
             VoiceSessionService.setSessionId(null)
             VoiceSessionService.clearHistory()
             viewModelScope.launch {
-                val checkResult = apiClient.health(newSettings)
-                VoiceSessionService.setIsConnected(checkResult.isSuccess)
-                if (checkResult.isSuccess) {
+                if (refreshConnectionHealth(newSettings)) {
                     loadProfiles(newSettings)
                 }
             }
@@ -160,6 +172,18 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
             VoiceSessionStatus.ERROR -> {
                 serviceController.reset()
             }
+        }
+    }
+
+    fun onTalkPressStart() {
+        if (uiState.value.status == VoiceSessionStatus.IDLE) {
+            serviceController.startRecording()
+        }
+    }
+
+    fun onTalkPressEnd() {
+        if (uiState.value.status == VoiceSessionStatus.LISTENING) {
+            serviceController.stopRecording()
         }
     }
 
@@ -212,6 +236,56 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun startPeriodicHealthChecks() {
+        healthCheckJob?.cancel()
+        healthCheckJob = viewModelScope.launch {
+            while (true) {
+                refreshConnectionHealth(settings.value)
+                delay(45_000)
+            }
+        }
+    }
+
+    fun stopPeriodicHealthChecks() {
+        healthCheckJob?.cancel()
+        healthCheckJob = null
+    }
+
+    private suspend fun refreshConnectionHealth(settings: HermesSettings): Boolean {
+        if (settings.baseUrl.isEmpty() || settings.apiKey.isEmpty()) {
+            VoiceSessionService.setGatewayConnection(
+                status = GatewayConnectionStatus.OFFLINE,
+                checkedAt = System.currentTimeMillis(),
+                errorMessage = "Gateway URL or API key is missing"
+            )
+            return false
+        }
+
+        VoiceSessionService.setGatewayConnection(GatewayConnectionStatus.CONNECTING)
+        var result: Result<Boolean>? = null
+        val latencyMs = measureTimeMillis {
+            result = apiClient.health(settings)
+        }
+        val checkedAt = System.currentTimeMillis()
+        val healthResult = result ?: Result.failure(IllegalStateException("Health check did not run"))
+        return if (healthResult.isSuccess && healthResult.getOrThrow()) {
+            VoiceSessionService.setGatewayConnection(
+                status = GatewayConnectionStatus.ONLINE,
+                checkedAt = checkedAt,
+                latencyMs = latencyMs
+            )
+            true
+        } else {
+            VoiceSessionService.setGatewayConnection(
+                status = GatewayConnectionStatus.OFFLINE,
+                checkedAt = checkedAt,
+                latencyMs = latencyMs,
+                errorMessage = healthResult.exceptionOrNull()?.message ?: "Gateway health check failed"
+            )
+            false
+        }
+    }
+
     fun onTestConnection(customSettings: HermesSettings? = null, onResult: (Boolean, String) -> Unit) {
         viewModelScope.launch {
             val targetSettings = customSettings ?: settings.value
@@ -224,19 +298,12 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
 
-            val result = apiClient.health(targetSettings)
-            if (result.isSuccess) {
-                val isOk = result.getOrThrow()
-                VoiceSessionService.setIsConnected(isOk)
-                if (isOk) {
-                    loadProfiles(targetSettings)
-                    onResult(true, "Successfully connected to Hermes Voice Gateway!")
-                } else {
-                    onResult(false, "Gateway responded with health failure.")
-                }
+            val isOk = refreshConnectionHealth(targetSettings)
+            if (isOk) {
+                loadProfiles(targetSettings)
+                onResult(true, "Successfully connected to Hermes Voice Gateway!")
             } else {
-                VoiceSessionService.setIsConnected(false)
-                val msg = result.exceptionOrNull()?.message ?: "Unknown error"
+                val msg = VoiceSessionService.connectionErrorMessage.value ?: "Unknown error"
                 onResult(false, "Connection failed: $msg")
             }
         }
@@ -254,5 +321,10 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
             ?: profiles.firstOrNull { it.id == defaultProfileId }
             ?: profiles.firstOrNull { it.isDefault }
             ?: profiles.first()
+    }
+
+    override fun onCleared() {
+        stopPeriodicHealthChecks()
+        super.onCleared()
     }
 }

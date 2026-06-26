@@ -34,18 +34,20 @@ export async function voiceRoutes(
 
       const profile = await profiles.resolve(parsed.data.profileId, parsed.data.agent || config.hermesAgent);
       const session = sessions.create(profile.id, profile.name, parsed.data.responseMode);
-      request.log.info(
-        {
-          requestedProfileId: parsed.data.profileId,
-          requestedAgent: parsed.data.agent,
-          resolvedProfileId: profile.id,
-          resolvedProfileName: profile.name,
-          hermesHome: profile.hermesHome,
-          responseMode: parsed.data.responseMode,
-          sessionId: session.sessionId
-        },
-        "Created voice session"
-      );
+      if (config.gatewayDebug) {
+        request.log.info(
+          {
+            requestedProfileId: parsed.data.profileId,
+            requestedAgent: parsed.data.agent,
+            resolvedProfileId: profile.id,
+            resolvedProfileName: profile.name,
+            hermesHome: profile.hermesHome,
+            responseMode: parsed.data.responseMode,
+            sessionId: session.sessionId
+          },
+          "Created voice session"
+        );
+      }
       return {
         sessionId: session.sessionId,
         profileId: session.profileId,
@@ -95,25 +97,27 @@ export async function voiceRoutes(
       const profile = await profiles.resolve(parsed.data.profileId, parsed.data.agent);
 
       sessions.touch(session.sessionId);
-      request.log.info(
-        {
-          sessionId: session.sessionId,
-          sessionProfileId: session.profileId,
-          requestProfileId: parsed.data.profileId,
-          requestAgent: parsed.data.agent,
-          resolvedProfileId: profile.id,
-          resolvedProfileName: profile.name,
-          hermesHome: profile.hermesHome,
-          responseMode: parsed.data.responseMode,
-          uploadFileName: saved.fileName
-        },
-        "Processing voice turn"
-      );
+      if (config.gatewayDebug) {
+        request.log.info(
+          {
+            sessionId: session.sessionId,
+            sessionProfileId: session.profileId,
+            requestProfileId: parsed.data.profileId,
+            requestAgent: parsed.data.agent,
+            resolvedProfileId: profile.id,
+            resolvedProfileName: profile.name,
+            hermesHome: profile.hermesHome,
+            responseMode: parsed.data.responseMode,
+            uploadFileName: saved.fileName
+          },
+          "Processing voice turn"
+        );
+      }
 
       let transcript: string;
       try {
         transcript = await transcribeAudio(saved.filePath, saved.fileName, config, profile, sttWorker);
-        request.log.info({ sessionId: session.sessionId, transcriptChars: transcript.length }, "Voice turn transcribed");
+        if (config.gatewayDebug) request.log.info({ sessionId: session.sessionId, transcriptChars: transcript.length }, "Voice turn transcribed");
       } catch (error) {
         request.log.error({ err: error }, "Transcription failed");
         return reply.code(502).send({ error: "Transcription failed" });
@@ -129,10 +133,12 @@ export async function voiceRoutes(
           transcript,
           history: sessions.getHistory(session.sessionId)
         });
-        request.log.info(
-          { sessionId: session.sessionId, responseChars: hermesResponse.responseText.length },
-          "Hermes agent response received"
-        );
+        if (config.gatewayDebug) {
+          request.log.info(
+            { sessionId: session.sessionId, responseChars: hermesResponse.responseText.length },
+            "Hermes agent response received"
+          );
+        }
       } catch (error) {
         request.log.error({ err: error }, "Hermes agent failed");
         return reply.code(502).send({ error: "Hermes agent failed" });
@@ -146,7 +152,7 @@ export async function voiceRoutes(
 
       try {
         const audio = await synthesizeSpeech(hermesResponse.responseText, config, profile);
-        request.log.info({ sessionId: session.sessionId, audioUrl: audio?.audioUrl ?? null }, "Voice turn TTS completed");
+        if (config.gatewayDebug) request.log.info({ sessionId: session.sessionId, audioUrl: audio?.audioUrl ?? null }, "Voice turn TTS completed");
         return {
           transcript,
           responseText: hermesResponse.responseText,

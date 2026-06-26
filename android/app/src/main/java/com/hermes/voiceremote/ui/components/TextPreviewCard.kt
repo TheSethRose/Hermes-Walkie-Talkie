@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 
 @Composable
@@ -26,6 +27,9 @@ fun TextPreviewCard(
     maxLines: Int,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(18.dp),
+    iconSize: androidx.compose.ui.unit.Dp = 18.dp,
+    bodyTextStyle: TextStyle = MaterialTheme.typography.bodyLarge,
     trailingContent: (@Composable RowScope.() -> Unit)? = null
 ) {
     val hasText = text.trim().isNotEmpty()
@@ -41,7 +45,7 @@ fun TextPreviewCard(
         ),
         border = CardDefaults.outlinedCardBorder()
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(contentPadding)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -54,7 +58,7 @@ fun TextPreviewCard(
                         icon,
                         contentDescription = title,
                         tint = accentColor,
-                        modifier = Modifier.padding(7.dp).size(18.dp)
+                        modifier = Modifier.padding(7.dp).size(iconSize)
                     )
                 }
                 Text(
@@ -72,11 +76,11 @@ fun TextPreviewCard(
             if (hasText) {
                 Text(
                     text = text,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = bodyTextStyle,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = maxLines,
                     overflow = TextOverflow.Ellipsis,
-                    lineHeight = MaterialTheme.typography.bodyLarge.lineHeight
+                    lineHeight = bodyTextStyle.lineHeight
                 )
                 if (showExpandHint) {
                     Spacer(modifier = Modifier.height(8.dp))

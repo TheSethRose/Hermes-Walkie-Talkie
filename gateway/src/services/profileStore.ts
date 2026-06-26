@@ -29,10 +29,12 @@ export class ProfileStore {
 
   async list(refresh = false): Promise<ProfilesResult> {
     if (!refresh && this.cached && this.cached.expiresAt > Date.now()) {
-      logger.info(
-        { count: this.cached.value.profiles.length, defaultProfileId: this.cached.value.defaultProfileId },
-        "Returning cached Hermes profiles"
-      );
+      if (this.config.gatewayDebug) {
+        logger.info(
+          { count: this.cached.value.profiles.length, defaultProfileId: this.cached.value.defaultProfileId },
+          "Returning cached Hermes profiles"
+        );
+      }
       return this.cached.value;
     }
 
@@ -40,20 +42,21 @@ export class ProfileStore {
       logger.warn({ err: error }, "Profile discovery failed; falling back to default profile");
       return this.fallback();
     });
-    logger.info(
-      {
-        count: value.profiles.length,
-        defaultProfileId: value.defaultProfileId,
-        profiles: value.profiles.map((profile) => ({
-          id: profile.id,
-          name: profile.name,
-          source: profile.source,
-          hermesHome: profile.hermesHome,
-          isDefault: profile.isDefault
-        }))
-      },
-      "Loaded Hermes profiles"
-    );
+    logger.info({ count: value.profiles.length, defaultProfileId: value.defaultProfileId }, "Loaded Hermes profiles");
+    if (this.config.gatewayDebug) {
+      logger.info(
+        {
+          profiles: value.profiles.map((profile) => ({
+            id: profile.id,
+            name: profile.name,
+            source: profile.source,
+            hermesHome: profile.hermesHome,
+            isDefault: profile.isDefault
+          }))
+        },
+        "Loaded Hermes profile details"
+      );
+    }
     this.cached = { expiresAt: Date.now() + 30_000, value };
     return value;
   }
@@ -65,18 +68,20 @@ export class ProfileStore {
       result.profiles.find((profile) => profile.id === requested || profile.name === requested) ??
       withHermesHome(profileFromId(requested || result.defaultProfileId, result.defaultProfileId, "config"))
     );
-    logger.info(
-      {
-        requestedProfileId: profileId,
-        requestedAgent: agent,
-        requested,
-        resolvedProfileId: profile.id,
-        resolvedProfileName: profile.name,
-        hermesHome: profile.hermesHome,
-        source: profile.source
-      },
-      "Resolved Hermes profile"
-    );
+    if (this.config.gatewayDebug) {
+      logger.info(
+        {
+          requestedProfileId: profileId,
+          requestedAgent: agent,
+          requested,
+          resolvedProfileId: profile.id,
+          resolvedProfileName: profile.name,
+          hermesHome: profile.hermesHome,
+          source: profile.source
+        },
+        "Resolved Hermes profile"
+      );
+    }
     return profile;
   }
 
@@ -111,12 +116,14 @@ export class ProfileStore {
   }
 
   private async fromCommand(command: string, argsTemplate: string) {
-    logger.info({ command, argsTemplate }, "Discovering Hermes profiles from command");
+    if (this.config.gatewayDebug) logger.info({ command, argsTemplate }, "Discovering Hermes profiles from command");
     const result = await runCommand(command, parseArgsTemplate(argsTemplate, {}), this.config.hermesTimeoutMs);
-    logger.info(
-      { command, exitCode: result.exitCode, timedOut: result.timedOut, stdoutChars: result.stdout.length, stderrChars: result.stderr.length },
-      "Hermes profile command finished"
-    );
+    if (this.config.gatewayDebug) {
+      logger.info(
+        { command, exitCode: result.exitCode, timedOut: result.timedOut, stdoutChars: result.stdout.length, stderrChars: result.stderr.length },
+        "Hermes profile command finished"
+      );
+    }
     if (result.timedOut || result.exitCode !== 0) return [];
     return parseProfiles(result.stdout, "hermes", this.config.hermesDefaultProfile);
   }

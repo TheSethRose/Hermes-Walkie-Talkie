@@ -55,18 +55,20 @@ async function synthesizeWithHermes(text: string, config: AppConfig, profile?: H
     "print(result if isinstance(result, str) else json.dumps(result))"
   ].join("\n");
 
-  logger.info(
-    {
-      profileId: profile?.id,
-      profileName: profile?.name,
-      hermesHome: profile?.hermesHome,
-      textChars: text.length,
-      outputFile: fileName,
-      hermesPython: config.hermesTtsPython,
-      hermesPythonPath: config.hermesPythonPath
-    },
-    "Starting Hermes TTS"
-  );
+  if (config.gatewayDebug) {
+    logger.info(
+      {
+        profileId: profile?.id,
+        profileName: profile?.name,
+        hermesHome: profile?.hermesHome,
+        textChars: text.length,
+        outputFile: fileName,
+        hermesPython: config.hermesTtsPython,
+        hermesPythonPath: config.hermesPythonPath
+      },
+      "Starting Hermes TTS"
+    );
+  }
 
   const result = await runCommand(
     config.hermesTtsPython,
@@ -83,7 +85,7 @@ async function synthesizeWithHermes(text: string, config: AppConfig, profile?: H
     throw new Error("Hermes TTS failed");
   }
 
-  if (result.stderr.trim()) {
+  if (config.gatewayDebug && result.stderr.trim()) {
     logger.info({ stderr: result.stderr.slice(0, 4000) }, "Hermes TTS diagnostics");
   }
 
@@ -99,7 +101,7 @@ async function synthesizeWithHermes(text: string, config: AppConfig, profile?: H
     filePath,
     audioUrl: baseUrl ? `${baseUrl}/audio/${fileName}` : `/audio/${fileName}`
   };
-  logger.info({ fileName, audioUrl: audio.audioUrl }, "Hermes TTS succeeded");
+  if (config.gatewayDebug) logger.info({ fileName, audioUrl: audio.audioUrl }, "Hermes TTS succeeded");
   return audio;
 }
 

@@ -4,8 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
@@ -15,17 +14,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.hermes.voiceremote.settings.TalkInteractionMode
 import com.hermes.voiceremote.state.VoiceSessionStatus
 
 @Composable
 fun TalkButton(
     status: VoiceSessionStatus,
-    onClick: () -> Unit,
+    talkInteractionMode: TalkInteractionMode,
+    onTap: () -> Unit,
+    onPressStart: () -> Unit,
+    onPressEnd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -75,20 +79,26 @@ fun TalkButton(
 
     val label = when (status) {
         VoiceSessionStatus.IDLE -> "Talk"
-        VoiceSessionStatus.LISTENING -> "Stop & Send"
+        VoiceSessionStatus.LISTENING -> "Listening…"
         VoiceSessionStatus.UPLOADING -> "Sending…"
-        VoiceSessionStatus.THINKING -> "Cancel"
-        VoiceSessionStatus.SPEAKING -> "Interrupt"
+        VoiceSessionStatus.THINKING -> "Thinking…"
+        VoiceSessionStatus.SPEAKING -> "Speaking…"
         VoiceSessionStatus.ERROR -> "Reset"
     }
 
     val description = when (status) {
-        VoiceSessionStatus.IDLE -> "Tap to speak to Hermes"
-        VoiceSessionStatus.LISTENING -> "Recording... Tap to upload"
-        VoiceSessionStatus.UPLOADING -> "Uploading voice payload"
-        VoiceSessionStatus.THINKING -> "Waiting for agent response"
-        VoiceSessionStatus.SPEAKING -> "Playing voice response"
-        VoiceSessionStatus.ERROR -> "Error occurred. Tap to clear"
+        VoiceSessionStatus.IDLE -> when (talkInteractionMode) {
+            TalkInteractionMode.PUSH_TO_TALK -> "Hold to speak to Hermes"
+            else -> "Tap to speak to Hermes"
+        }
+        VoiceSessionStatus.LISTENING -> when (talkInteractionMode) {
+            TalkInteractionMode.PUSH_TO_TALK -> "Release to send"
+            else -> "Tap again to send"
+        }
+        VoiceSessionStatus.UPLOADING -> "Uploading voice"
+        VoiceSessionStatus.THINKING -> "Hermes is processing"
+        VoiceSessionStatus.SPEAKING -> "Hermes is responding"
+        VoiceSessionStatus.ERROR -> "Tap to clear error"
     }
 
     Box(
@@ -98,7 +108,24 @@ fun TalkButton(
             .clip(CircleShape)
             .background(backgroundColor)
             .border(4.dp, contentColor.copy(alpha = 0.4f), CircleShape)
-            .clickable { onClick() }
+            .pointerInput(talkInteractionMode, status) {
+                detectTapGestures(
+                    onTap = {
+                        if (talkInteractionMode == TalkInteractionMode.TAP_TO_TALK ||
+                            status != VoiceSessionStatus.IDLE && status != VoiceSessionStatus.LISTENING
+                        ) {
+                            onTap()
+                        }
+                    },
+                    onPress = {
+                        if (talkInteractionMode == TalkInteractionMode.PUSH_TO_TALK && status == VoiceSessionStatus.IDLE) {
+                            onPressStart()
+                            tryAwaitRelease()
+                            onPressEnd()
+                        }
+                    }
+                )
+            }
             .testTag("talk_button"),
         contentAlignment = Alignment.Center
     ) {

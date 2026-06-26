@@ -25,6 +25,10 @@ export class PersistentSttWorker {
 
   constructor(private config: AppConfig) {}
 
+  get debugEnabled() {
+    return this.config.gatewayDebug;
+  }
+
   start() {
     if (this.child) return;
     this.child = spawn(
@@ -39,10 +43,13 @@ export class PersistentSttWorker {
         }
       }
     );
-    logger.info(
-      { hermesPython: this.config.hermesSttPython, hermesPythonPath: this.config.hermesPythonPath },
-      "Started persistent Hermes STT worker"
-    );
+    logger.info("Started persistent Hermes STT worker");
+    if (this.config.gatewayDebug) {
+      logger.info(
+        { hermesPython: this.config.hermesSttPython, hermesPythonPath: this.config.hermesPythonPath },
+        "Persistent Hermes STT worker details"
+      );
+    }
 
     this.child.stdout.on("data", (chunk) => this.handleStdout(Buffer.from(chunk).toString("utf8")));
     this.child.stderr.on("data", (chunk) => this.handleStderr(Buffer.from(chunk).toString("utf8")));
@@ -68,7 +75,7 @@ export class PersistentSttWorker {
       this.child?.stdin.write(`${JSON.stringify({ id, filePath, hermesHome: profile?.hermesHome })}\n`);
     });
 
-    if (response.diagnostic) {
+    if (this.config.gatewayDebug && response.diagnostic) {
       logger.info({ diagnostic: response.diagnostic }, "Hermes STT worker diagnostics");
     }
     if (response.error) throw new Error(response.error);
@@ -102,7 +109,7 @@ export class PersistentSttWorker {
     const lines = this.stderrBuffer.split("\n");
     this.stderrBuffer = lines.pop() ?? "";
     for (const line of lines) {
-      if (line.trim()) logger.info({ stderr: line.slice(0, 4000) }, "Hermes STT worker stderr");
+      if (this.config.gatewayDebug && line.trim()) logger.info({ stderr: line.slice(0, 4000) }, "Hermes STT worker stderr");
     }
   }
 
