@@ -24,6 +24,7 @@ import com.hermes.voiceremote.settings.AudioInputPreference
 import com.hermes.voiceremote.settings.HermesSettings
 import com.hermes.voiceremote.settings.ResponseMode
 import com.hermes.voiceremote.settings.TalkInteractionMode
+import com.hermes.voiceremote.settings.defaultVadSettings
 import com.hermes.voiceremote.state.VoiceViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -37,7 +38,11 @@ fun SettingsScreen(
     val currentSettings = remember { viewModel.loadSettings() }
     val storageError by viewModel.storageError.collectAsState()
     val profiles by viewModel.profiles.collectAsState()
+    val ttsVoices by viewModel.ttsVoices.collectAsState()
     val profileLoadError by viewModel.profileLoadError.collectAsState()
+    val currentModePreset = remember(currentSettings.talkInteractionMode) {
+        currentSettings.talkInteractionMode.defaultVadSettings()
+    }
 
     var baseUrl by remember { mutableStateOf(currentSettings.baseUrl) }
     var apiKeyInput by remember { mutableStateOf("") }
@@ -45,7 +50,12 @@ fun SettingsScreen(
     var selectedProfileName by remember { mutableStateOf(currentSettings.selectedProfileName) }
     var responseMode by remember { mutableStateOf(currentSettings.responseMode) }
     var talkInteractionMode by remember { mutableStateOf(currentSettings.talkInteractionMode) }
-    var audioInputPref by remember { mutableStateOf(currentSettings.audioInputPreference) }
+    var selectedTtsVoiceId by remember { mutableStateOf(currentSettings.selectedTtsVoiceId) }
+    var vadEngine by remember { mutableStateOf(currentModePreset.vadEngine) }
+    var vadSpeechThreshold by remember { mutableStateOf(currentModePreset.vadSpeechThreshold.toString()) }
+    var vadSilenceMs by remember { mutableStateOf(currentModePreset.vadSilenceMs.toString()) }
+    var bargeInEnabled by remember { mutableStateOf(currentSettings.bargeInEnabled) }
+    var bargeInMinSpeechMs by remember { mutableStateOf(currentModePreset.bargeInMinSpeechMs.toString()) }
 
     val hasSavedKey = currentSettings.apiKey.isNotEmpty()
     val apiKeyPlaceholder = if (hasSavedKey) "•••••••• (Key saved)" else "Enter API Key"
@@ -59,9 +69,10 @@ fun SettingsScreen(
     // Dropdown States
     var responseModeExpanded by remember { mutableStateOf(false) }
     var talkModeExpanded by remember { mutableStateOf(false) }
-    var audioPrefExpanded by remember { mutableStateOf(false) }
+    var ttsVoiceExpanded by remember { mutableStateOf(false) }
     var profileExpanded by remember { mutableStateOf(false) }
     var isLoadingProfiles by remember { mutableStateOf(false) }
+    var isLoadingVoices by remember { mutableStateOf(false) }
 
     LaunchedEffect(profiles) {
         if (profiles.isNotEmpty()) {
@@ -82,7 +93,18 @@ fun SettingsScreen(
             selectedProfileName != currentSettings.selectedProfileName ||
             responseMode != currentSettings.responseMode ||
             talkInteractionMode != currentSettings.talkInteractionMode ||
-            audioInputPref != currentSettings.audioInputPreference
+            selectedTtsVoiceId != currentSettings.selectedTtsVoiceId ||
+            bargeInEnabled != currentSettings.bargeInEnabled
+    }
+
+    fun applyTalkModePreset(mode: TalkInteractionMode) {
+        val preset = mode.defaultVadSettings()
+        talkInteractionMode = mode
+        vadEngine = preset.vadEngine
+        vadSpeechThreshold = preset.vadSpeechThreshold.toString()
+        vadSilenceMs = preset.vadSilenceMs.toString()
+        bargeInEnabled = preset.bargeInEnabled
+        bargeInMinSpeechMs = preset.bargeInMinSpeechMs.toString()
     }
 
     fun navigateBackOrConfirmDiscard() {
@@ -256,12 +278,25 @@ fun SettingsScreen(
                             selectedProfileId = selectedProfileId.trim(),
                             selectedProfileName = selectedProfileName.trim(),
                             responseMode = responseMode,
-                            audioInputPreference = audioInputPref,
-                            talkInteractionMode = talkInteractionMode
+                            audioInputPreference = AudioInputPreference.AUTO,
+                            talkInteractionMode = talkInteractionMode,
+                            selectedTtsVoiceId = selectedTtsVoiceId,
+                            vadEngine = vadEngine,
+                            vadSpeechThreshold = vadSpeechThreshold.toFloatOrNull() ?: currentSettings.vadSpeechThreshold,
+                            vadSilenceMs = vadSilenceMs.toIntOrNull() ?: currentSettings.vadSilenceMs,
+                            bargeInEnabled = bargeInEnabled,
+                            bargeInMinSpeechMs = bargeInMinSpeechMs.toIntOrNull() ?: currentSettings.bargeInMinSpeechMs
                         )
                         viewModel.loadProfiles(tempSettings) { success, message ->
                             isLoadingProfiles = false
                             Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                            if (success) {
+                                isLoadingVoices = true
+                                viewModel.loadTtsVoices(tempSettings) { _, voiceMessage ->
+                                    isLoadingVoices = false
+                                    Toast.makeText(context, voiceMessage, Toast.LENGTH_SHORT).show()
+                                }
+                            }
                         }
                     }
                 },
@@ -341,6 +376,100 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold
             )
+
+            if (ttsVoices.isEmpty()) {
+                OutlinedButton(
+                    onClick = {
+                        val resolvedApiKey = if (apiKeyInput.trim().isEmpty()) currentSettings.apiKey else apiKeyInput.trim()
+                        val tempSettings = HermesSettings(
+                            baseUrl = baseUrl.trim(),
+                            apiKey = resolvedApiKey,
+                            selectedProfileId = selectedProfileId.trim(),
+                            selectedProfileName = selectedProfileName.trim(),
+                            responseMode = responseMode,
+                            audioInputPreference = AudioInputPreference.AUTO,
+                            talkInteractionMode = talkInteractionMode,
+                            selectedTtsVoiceId = selectedTtsVoiceId,
+                            vadEngine = vadEngine,
+                            vadSpeechThreshold = vadSpeechThreshold.toFloatOrNull() ?: currentSettings.vadSpeechThreshold,
+                            vadSilenceMs = vadSilenceMs.toIntOrNull() ?: currentSettings.vadSilenceMs,
+                            bargeInEnabled = bargeInEnabled,
+                            bargeInMinSpeechMs = bargeInMinSpeechMs.toIntOrNull() ?: currentSettings.bargeInMinSpeechMs
+                        )
+                        isLoadingVoices = true
+                        viewModel.loadTtsVoices(tempSettings) { _, message ->
+                            isLoadingVoices = false
+                            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().testTag("load_tts_voices_button"),
+                    enabled = !isLoadingVoices
+                ) {
+                    if (isLoadingVoices) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Text("Load Voices")
+                }
+            } else {
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    val selectedVoice = ttsVoices.firstOrNull { it.id == selectedTtsVoiceId }
+                    OutlinedTextField(
+                        value = selectedVoice?.let { voice ->
+                            listOfNotNull(voice.name, voice.locale).joinToString(" · ")
+                        } ?: if (selectedTtsVoiceId.isBlank()) "Gateway default" else selectedTtsVoiceId,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("TTS Voice") },
+                        trailingIcon = { Icon(Icons.Default.ArrowDropDown, "Open Dropdown") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = false,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            disabledBorderColor = MaterialTheme.colorScheme.outline,
+                            disabledTextColor = MaterialTheme.colorScheme.onSurface,
+                            disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .clickable { ttsVoiceExpanded = true }
+                            .testTag("tts_voice_dropdown")
+                    )
+                    DropdownMenu(
+                        expanded = ttsVoiceExpanded,
+                        onDismissRequest = { ttsVoiceExpanded = false },
+                        modifier = Modifier.fillMaxWidth(0.9f)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Gateway default") },
+                            onClick = {
+                                selectedTtsVoiceId = ""
+                                ttsVoiceExpanded = false
+                            }
+                        )
+                        ttsVoices.forEach { voice ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(voice.name, fontWeight = FontWeight.SemiBold)
+                                        Text(
+                                            listOfNotNull(voice.locale, voice.gender, voice.provider).joinToString(" / "),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    selectedTtsVoiceId = voice.id
+                                    ttsVoiceExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
 
             // Response Mode Dropdown
             Box(modifier = Modifier.fillMaxWidth()) {
@@ -427,14 +556,14 @@ fun SettingsScreen(
                     DropdownMenuItem(
                         text = { Text("Tap to talk") },
                         onClick = {
-                            talkInteractionMode = TalkInteractionMode.TAP_TO_TALK
+                            applyTalkModePreset(TalkInteractionMode.TAP_TO_TALK)
                             talkModeExpanded = false
                         }
                     )
                     DropdownMenuItem(
                         text = { Text("Push to talk") },
                         onClick = {
-                            talkInteractionMode = TalkInteractionMode.PUSH_TO_TALK
+                            applyTalkModePreset(TalkInteractionMode.PUSH_TO_TALK)
                             talkModeExpanded = false
                         }
                     )
@@ -443,73 +572,37 @@ fun SettingsScreen(
                             Column {
                                 Text("Always listening")
                                 Text(
-                                    "Coming soon: streaming conversation with interruption support.",
+                                    "Use the main button to turn continuous listening on or off.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         },
-                        onClick = {},
-                        enabled = false
+                        onClick = {
+                            applyTalkModePreset(TalkInteractionMode.ALWAYS_LISTENING)
+                            talkModeExpanded = false
+                        }
                     )
                 }
             }
 
-            // Audio Route Preferences Dropdown
-            Box(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = when (audioInputPref) {
-                        AudioInputPreference.AUTO -> "Auto"
-                        AudioInputPreference.PHONE_MIC -> "Phone mic"
-                        AudioInputPreference.BLUETOOTH_HEADSET -> "Bluetooth headset"
-                    },
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Preferred Audio Route") },
-                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, "Open Dropdown") },
-                    modifier = Modifier
-                        .fillMaxWidth(),
-                    enabled = false,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        disabledBorderColor = MaterialTheme.colorScheme.outline,
-                        disabledTextColor = MaterialTheme.colorScheme.onSurface,
-                        disabledLabelColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    ),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                // Overlay to capture clicks
-                Box(
-                    modifier = Modifier
-                        .matchParentSize()
-                        .clickable { audioPrefExpanded = true }
-                )
-                DropdownMenu(
-                    expanded = audioPrefExpanded,
-                    onDismissRequest = { audioPrefExpanded = false },
-                    modifier = Modifier.fillMaxWidth(0.9f)
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Auto (Recommended)") },
-                        onClick = {
-                            audioInputPref = AudioInputPreference.AUTO
-                            audioPrefExpanded = false
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Phone mic") },
-                        onClick = {
-                            audioInputPref = AudioInputPreference.PHONE_MIC
-                            audioPrefExpanded = false
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Bluetooth headset") },
-                        onClick = {
-                            audioInputPref = AudioInputPreference.BLUETOOTH_HEADSET
-                            audioPrefExpanded = false
-                        }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Voice barge-in", style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        text = "Always Listening only",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Switch(
+                    checked = bargeInEnabled,
+                    onCheckedChange = { bargeInEnabled = it }
+                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -524,8 +617,14 @@ fun SettingsScreen(
                             selectedProfileId = selectedProfileId.trim(),
                             selectedProfileName = selectedProfileName.trim().ifBlank { selectedProfileId.trim() },
                             responseMode = responseMode,
-                            audioInputPreference = audioInputPref,
-                            talkInteractionMode = talkInteractionMode
+                            audioInputPreference = AudioInputPreference.AUTO,
+                            talkInteractionMode = talkInteractionMode,
+                            selectedTtsVoiceId = selectedTtsVoiceId,
+                            vadEngine = vadEngine,
+                            vadSpeechThreshold = vadSpeechThreshold.toFloatOrNull() ?: currentSettings.vadSpeechThreshold,
+                            vadSilenceMs = vadSilenceMs.toIntOrNull() ?: currentSettings.vadSilenceMs,
+                            bargeInEnabled = bargeInEnabled,
+                            bargeInMinSpeechMs = bargeInMinSpeechMs.toIntOrNull() ?: currentSettings.bargeInMinSpeechMs
                         )
 
                         val success = viewModel.saveSettings(updatedSettings)

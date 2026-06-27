@@ -24,6 +24,7 @@ data class VoiceSessionUiState(
     val responseText: String = "",
     val lastAudioUrl: String? = null,
     val isPlaybackAvailable: Boolean = false,
+    val isAlwaysListeningActive: Boolean = false,
     val turnHistory: List<VoiceTurnUi> = emptyList(),
     val errorMessage: String? = null,
     val isBusy: Boolean = false

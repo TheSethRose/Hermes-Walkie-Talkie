@@ -4,16 +4,15 @@ import type { AppConfig } from "./config.js";
 
 export function requireAuth(config: AppConfig) {
   return async (request: FastifyRequest, reply: FastifyReply) => {
-    const header = request.headers.authorization;
-    if (!header?.startsWith("Bearer ")) {
-      return reply.code(401).send({ error: "Unauthorized" });
-    }
-
-    const token = header.slice("Bearer ".length);
-    if (!secureEqual(token, config.apiKey)) {
+    if (!isAuthorizedBearer(request.headers.authorization, config)) {
       return reply.code(401).send({ error: "Unauthorized" });
     }
   };
+}
+
+export function isAuthorizedBearer(header: string | undefined, config: AppConfig) {
+  if (!header?.startsWith("Bearer ")) return false;
+  return secureEqual(header.slice("Bearer ".length), config.apiKey);
 }
 
 function secureEqual(a: string, b: string) {

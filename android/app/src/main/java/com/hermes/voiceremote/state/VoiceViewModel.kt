@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.hermes.voiceremote.audio.AudioRouteManager
 import com.hermes.voiceremote.network.HermesApiClient
 import com.hermes.voiceremote.network.HermesProfileDto
+import com.hermes.voiceremote.network.TtsVoiceDto
 import com.hermes.voiceremote.service.VoiceServiceController
 import com.hermes.voiceremote.service.VoiceSessionService
 import com.hermes.voiceremote.settings.AudioInputPreference
@@ -38,11 +39,14 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
     private val _storageError = MutableStateFlow<String?>(settingsRepository.initError)
     val storageError = _storageError.asStateFlow()
 
-    private val _profiles = MutableStateFlow<List<HermesProfileDto>>(emptyList())
+    private val _profiles = MutableStateFlow(settingsRepository.getCachedProfiles())
     val profiles = _profiles.asStateFlow()
 
     private val _profileLoadError = MutableStateFlow<String?>(null)
     val profileLoadError = _profileLoadError.asStateFlow()
+
+    private val _ttsVoices = MutableStateFlow(settingsRepository.getCachedTtsVoices())
+    val ttsVoices = _ttsVoices.asStateFlow()
 
     val uiState: StateFlow<VoiceSessionUiState> = combine(
         listOf(
@@ -58,6 +62,7 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
             VoiceSessionService.transcript,
             VoiceSessionService.responseText,
             VoiceSessionService.lastAudioUrl,
+            VoiceSessionService.isAlwaysListeningActive,
             VoiceSessionService.turnHistory,
             VoiceSessionService.errorMessage
         )
@@ -74,9 +79,10 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
         val transcript = array[9] as String
         val responseText = array[10] as String
         val lastAudioUrl = array[11] as? String
+        val isAlwaysListeningActive = array[12] as Boolean
         @Suppress("UNCHECKED_CAST")
-        val turnHistory = array[12] as List<VoiceTurnUi>
-        val errorMessage = array[13] as? String
+        val turnHistory = array[13] as List<VoiceTurnUi>
+        val errorMessage = array[14] as? String
 
         val isBusy = status == VoiceSessionStatus.UPLOADING ||
                      status == VoiceSessionStatus.THINKING ||
@@ -96,6 +102,7 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
             responseText = responseText,
             lastAudioUrl = lastAudioUrl,
             isPlaybackAvailable = !lastAudioUrl.isNullOrEmpty(),
+            isAlwaysListeningActive = isAlwaysListeningActive,
             turnHistory = turnHistory,
             errorMessage = errorMessage,
             isBusy = isBusy
@@ -122,6 +129,7 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
             val connected = refreshConnectionHealth(currentSettings)
             if (connected) {
                 loadProfiles(currentSettings)
+                loadTtsVoices(currentSettings)
             }
         }
         return currentSettings
@@ -139,6 +147,7 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 if (refreshConnectionHealth(newSettings)) {
                     loadProfiles(newSettings)
+                    loadTtsVoices(newSettings)
                 }
             }
             return true
@@ -152,6 +161,15 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onTalkButtonPressed() {
         val state = uiState.value
+        if (settings.value.talkInteractionMode == TalkInteractionMode.ALWAYS_LISTENING) {
+            when (state.status) {
+                VoiceSessionStatus.ERROR -> serviceController.reset()
+                VoiceSessionStatus.SPEAKING -> serviceController.interrupt()
+                else -> serviceController.toggleAlwaysListening()
+            }
+            return
+        }
+
         when (state.status) {
             VoiceSessionStatus.IDLE -> {
                 serviceController.startRecording()
@@ -214,6 +232,7 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
             if (result.isSuccess) {
                 val response = result.getOrThrow()
                 _profiles.value = response.profiles
+                settingsRepository.saveCachedProfiles(response.profiles)
                 _profileLoadError.value = null
                 val selected = chooseSelectedProfile(response.profiles, response.defaultProfileId, targetSettings)
                 if (selected != null && (selected.id != targetSettings.selectedProfileId || selected.name != targetSettings.selectedProfileName)) {
@@ -232,6 +251,22 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
                 val message = result.exceptionOrNull()?.message ?: "Unknown error"
                 _profileLoadError.value = message
                 onResult?.invoke(false, "Profile load failed: $message")
+            }
+        }
+    }
+
+    fun loadTtsVoices(customSettings: HermesSettings? = null, onResult: ((Boolean, String) -> Unit)? = null) {
+        viewModelScope.launch {
+            val targetSettings = customSettings ?: settings.value
+            val result = apiClient.getTtsVoices(targetSettings)
+            if (result.isSuccess) {
+                val response = result.getOrThrow()
+                _ttsVoices.value = response.voices
+                settingsRepository.saveCachedTtsVoices(response.voices)
+                onResult?.invoke(true, "Loaded ${response.voices.size} voices")
+            } else {
+                val message = result.exceptionOrNull()?.message ?: "Unknown error"
+                onResult?.invoke(false, "Voice load failed: $message")
             }
         }
     }
@@ -301,6 +336,7 @@ class VoiceViewModel(application: Application) : AndroidViewModel(application) {
             val isOk = refreshConnectionHealth(targetSettings)
             if (isOk) {
                 loadProfiles(targetSettings)
+                loadTtsVoices(targetSettings)
                 onResult(true, "Successfully connected to Hermes Voice Gateway!")
             } else {
                 val msg = VoiceSessionService.connectionErrorMessage.value ?: "Unknown error"

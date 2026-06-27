@@ -13,7 +13,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -27,12 +26,17 @@ import com.hermes.voiceremote.state.VoiceSessionStatus
 fun TalkButton(
     status: VoiceSessionStatus,
     talkInteractionMode: TalkInteractionMode,
+    isAlwaysListeningActive: Boolean,
     onTap: () -> Unit,
     onPressStart: () -> Unit,
     onPressEnd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val currentStatus by rememberUpdatedState(status)
+    val currentOnTap by rememberUpdatedState(onTap)
+    val currentOnPressStart by rememberUpdatedState(onPressStart)
+    val currentOnPressEnd by rememberUpdatedState(onPressEnd)
     
     // Scale animation for LISTENING and SPEAKING states
     val scaleValue by infiniteTransition.animateFloat(
@@ -45,7 +49,7 @@ fun TalkButton(
         label = "pulse_scale"
     )
 
-    val scaleModifier = if (status == VoiceSessionStatus.LISTENING || status == VoiceSessionStatus.SPEAKING) {
+    val scaleModifier = if (status == VoiceSessionStatus.LISTENING || status == VoiceSessionStatus.SPEAKING || isAlwaysListeningActive) {
         Modifier.scale(scaleValue)
     } else {
         Modifier
@@ -53,7 +57,7 @@ fun TalkButton(
 
     val backgroundColor by animateColorAsState(
         targetValue = when (status) {
-            VoiceSessionStatus.IDLE -> MaterialTheme.colorScheme.primaryContainer
+            VoiceSessionStatus.IDLE -> if (isAlwaysListeningActive) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer
             VoiceSessionStatus.LISTENING -> MaterialTheme.colorScheme.error
             VoiceSessionStatus.UPLOADING -> MaterialTheme.colorScheme.surfaceVariant
             VoiceSessionStatus.THINKING -> MaterialTheme.colorScheme.surfaceVariant
@@ -66,7 +70,7 @@ fun TalkButton(
 
     val contentColor by animateColorAsState(
         targetValue = when (status) {
-            VoiceSessionStatus.IDLE -> MaterialTheme.colorScheme.onPrimaryContainer
+            VoiceSessionStatus.IDLE -> if (isAlwaysListeningActive) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimaryContainer
             VoiceSessionStatus.LISTENING -> MaterialTheme.colorScheme.onError
             VoiceSessionStatus.UPLOADING -> MaterialTheme.colorScheme.onSurfaceVariant
             VoiceSessionStatus.THINKING -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -78,7 +82,7 @@ fun TalkButton(
     )
 
     val label = when (status) {
-        VoiceSessionStatus.IDLE -> "Talk"
+        VoiceSessionStatus.IDLE -> if (isAlwaysListeningActive) "Listening…" else "Talk"
         VoiceSessionStatus.LISTENING -> "Listening…"
         VoiceSessionStatus.UPLOADING -> "Sending…"
         VoiceSessionStatus.THINKING -> "Thinking…"
@@ -88,12 +92,14 @@ fun TalkButton(
 
     val description = when (status) {
         VoiceSessionStatus.IDLE -> when (talkInteractionMode) {
+            TalkInteractionMode.ALWAYS_LISTENING -> if (isAlwaysListeningActive) "Tap to stop listening" else "Tap to start listening"
             TalkInteractionMode.PUSH_TO_TALK -> "Hold to speak to Hermes"
-            else -> "Tap to speak to Hermes"
+            TalkInteractionMode.TAP_TO_TALK -> "Tap to speak to Hermes"
         }
         VoiceSessionStatus.LISTENING -> when (talkInteractionMode) {
             TalkInteractionMode.PUSH_TO_TALK -> "Release to send"
-            else -> "Tap again to send"
+            TalkInteractionMode.ALWAYS_LISTENING -> "Tap to stop listening"
+            TalkInteractionMode.TAP_TO_TALK -> "Tap again to send"
         }
         VoiceSessionStatus.UPLOADING -> "Uploading voice"
         VoiceSessionStatus.THINKING -> "Hermes is processing"
@@ -108,20 +114,24 @@ fun TalkButton(
             .clip(CircleShape)
             .background(backgroundColor)
             .border(4.dp, contentColor.copy(alpha = 0.4f), CircleShape)
-            .pointerInput(talkInteractionMode, status) {
+            .pointerInput(talkInteractionMode, isAlwaysListeningActive) {
                 detectTapGestures(
                     onTap = {
                         if (talkInteractionMode == TalkInteractionMode.TAP_TO_TALK ||
-                            status != VoiceSessionStatus.IDLE && status != VoiceSessionStatus.LISTENING
+                            talkInteractionMode == TalkInteractionMode.ALWAYS_LISTENING ||
+                            currentStatus != VoiceSessionStatus.IDLE && currentStatus != VoiceSessionStatus.LISTENING
                         ) {
-                            onTap()
+                            currentOnTap()
                         }
                     },
                     onPress = {
-                        if (talkInteractionMode == TalkInteractionMode.PUSH_TO_TALK && status == VoiceSessionStatus.IDLE) {
-                            onPressStart()
-                            tryAwaitRelease()
-                            onPressEnd()
+                        if (talkInteractionMode == TalkInteractionMode.PUSH_TO_TALK && currentStatus == VoiceSessionStatus.IDLE) {
+                            currentOnPressStart()
+                            try {
+                                tryAwaitRelease()
+                            } finally {
+                                currentOnPressEnd()
+                            }
                         }
                     }
                 )

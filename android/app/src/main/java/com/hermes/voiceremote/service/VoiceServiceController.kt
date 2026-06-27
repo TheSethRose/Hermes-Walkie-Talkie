@@ -34,6 +34,14 @@ class VoiceServiceController(private val context: Context) {
         sendIntent(VoiceSessionService.ACTION_NEW_SESSION)
     }
 
+    fun toggleAlwaysListening() {
+        sendIntent(VoiceSessionService.ACTION_TOGGLE_ALWAYS_LISTENING)
+    }
+
+    fun sendStreamingUtterance() {
+        sendIntent(VoiceSessionService.ACTION_SEND_STREAMING_UTTERANCE)
+    }
+
     private fun sendIntent(action: String) {
         val intent = Intent(context, VoiceSessionService::class.java).apply {
             this.action = action

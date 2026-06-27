@@ -12,10 +12,17 @@ import com.hermes.voiceremote.MainActivity
 import com.hermes.voiceremote.audio.AudioPlayer
 import com.hermes.voiceremote.audio.AudioRecorder
 import com.hermes.voiceremote.audio.AudioRouteManager
+import com.hermes.voiceremote.audio.RmsVad
+import com.hermes.voiceremote.audio.SileroOnnxVad
+import com.hermes.voiceremote.audio.StreamingAudioRecorder
+import com.hermes.voiceremote.audio.VoiceVad
 import com.hermes.voiceremote.network.HermesApiClient
+import com.hermes.voiceremote.network.StreamingVoiceClient
 import com.hermes.voiceremote.settings.AudioRoute
+import com.hermes.voiceremote.settings.HermesSettings
 import com.hermes.voiceremote.settings.ResponseMode
 import com.hermes.voiceremote.settings.SettingsRepository
+import com.hermes.voiceremote.settings.VadEngine
 import com.hermes.voiceremote.state.GatewayConnectionStatus
 import com.hermes.voiceremote.state.VoiceSessionStatus
 import com.hermes.voiceremote.state.VoiceTurnUi
@@ -27,21 +34,27 @@ import java.io.File
 class VoiceSessionService : Service() {
 
     private lateinit var audioRecorder: AudioRecorder
+    private lateinit var streamingAudioRecorder: StreamingAudioRecorder
     private lateinit var audioPlayer: AudioPlayer
     private lateinit var audioRouteManager: AudioRouteManager
     private lateinit var apiClient: HermesApiClient
+    private lateinit var streamingClient: StreamingVoiceClient
     private lateinit var settingsRepository: SettingsRepository
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var activeJob: Job? = null
+    private var playbackJob: Job? = null
     private var recordedFile: File? = null
+    private var playbackStartedAtMs: Long = 0L
 
     override fun onCreate() {
         super.onCreate()
         audioRecorder = AudioRecorder(this)
+        streamingAudioRecorder = StreamingAudioRecorder(this)
         audioPlayer = AudioPlayer(this)
         audioRouteManager = AudioRouteManager(this)
         apiClient = HermesApiClient()
+        streamingClient = StreamingVoiceClient(apiClient)
         settingsRepository = SettingsRepository(this)
 
         createNotificationChannel()
@@ -66,6 +79,8 @@ class VoiceSessionService : Service() {
             ACTION_RESET -> handleReset()
             ACTION_REPLAY_LAST_RESPONSE -> handleReplayLastResponse()
             ACTION_NEW_SESSION -> handleNewSession()
+            ACTION_TOGGLE_ALWAYS_LISTENING -> handleToggleAlwaysListening()
+            ACTION_SEND_STREAMING_UTTERANCE -> handleSendStreamingUtterance()
         }
 
         return START_STICKY
@@ -276,6 +291,8 @@ class VoiceSessionService : Service() {
 
     private fun handleCancel() {
         activeJob?.cancel()
+        playbackJob?.cancel()
+        stopAlwaysListening(endSession = true)
         audioPlayer.stop()
         if (_status.value == VoiceSessionStatus.LISTENING) {
             audioRecorder.cancelRecording()
@@ -301,7 +318,16 @@ class VoiceSessionService : Service() {
 
     private fun handleInterrupt() {
         activeJob?.cancel()
+        playbackJob?.cancel()
         audioPlayer.stop()
+        if (_isAlwaysListeningActive.value) {
+            streamingClient.interrupt()
+            streamingAudioRecorder.setPaused(false)
+            streamingAudioRecorder.resetVad()
+            _status.value = VoiceSessionStatus.LISTENING
+            updateNotification()
+            return
+        }
         val settings = settingsRepository.getSettings().getOrNull()
         val sId = _sessionId.value
         if (settings != null && !sId.isNullOrEmpty() && _status.value == VoiceSessionStatus.SPEAKING) {
@@ -341,6 +367,8 @@ class VoiceSessionService : Service() {
 
     private fun handleNewSession() {
         activeJob?.cancel()
+        playbackJob?.cancel()
+        stopAlwaysListening(endSession = true)
         audioPlayer.stop()
         val settings = settingsRepository.getSettings().getOrNull()
         val sId = _sessionId.value
@@ -353,6 +381,260 @@ class VoiceSessionService : Service() {
         clearHistory()
         _status.value = VoiceSessionStatus.IDLE
         updateNotification()
+    }
+
+    private fun handleToggleAlwaysListening() {
+        if (_isAlwaysListeningActive.value) {
+            stopAlwaysListening(endSession = true)
+        } else {
+            startAlwaysListening()
+        }
+    }
+
+    private fun handleSendStreamingUtterance() {
+        if (!_isAlwaysListeningActive.value) return
+        streamingAudioRecorder.forceSpeechEnd()
+        if (_status.value == VoiceSessionStatus.LISTENING) {
+            _status.value = VoiceSessionStatus.THINKING
+            updateNotification()
+        }
+    }
+
+    private fun startAlwaysListening() {
+        activeJob?.cancel()
+        playbackJob?.cancel()
+        audioPlayer.stop()
+
+        activeJob = serviceScope.launch {
+            val settingsResult = settingsRepository.getSettings()
+            if (settingsResult.isFailure) {
+                _status.value = VoiceSessionStatus.ERROR
+                _errorMessage.value = "Settings storage error: ${settingsResult.exceptionOrNull()?.message}"
+                updateNotification()
+                return@launch
+            }
+            val settings = settingsResult.getOrThrow()
+            _agentProfile.value = settings.selectedProfileName
+
+            val route = audioRouteManager.preferConfiguredRoute(settings.audioInputPreference)
+            _audioRoute.value = route
+            if (route == AudioRoute.BLUETOOTH_HEADSET) {
+                audioRouteManager.awaitLegacyScoConnection()
+            }
+
+            val connectResult = streamingClient.connect(settings, _sessionId.value, streamingListener(settings))
+            if (connectResult.isFailure) {
+                _status.value = VoiceSessionStatus.ERROR
+                _errorMessage.value = "Streaming connection failed: ${connectResult.exceptionOrNull()?.message}"
+                updateNotification()
+                return@launch
+            }
+
+            _isAlwaysListeningActive.value = true
+            val recordResult = streamingAudioRecorder.start(
+                scope = serviceScope,
+                vadEngine = createVad(settings),
+                onSpeechStart = speechStart@{ debug ->
+                    if (!_isAlwaysListeningActive.value) return@speechStart false
+                    if (_status.value == VoiceSessionStatus.SPEAKING) {
+                        if (!settings.bargeInEnabled) return@speechStart false
+                        val elapsedPlaybackMs = System.currentTimeMillis() - playbackStartedAtMs
+                        if (elapsedPlaybackMs < BARGE_IN_PLAYBACK_GUARD_MS) return@speechStart false
+                        if (debug.rms < BARGE_IN_MIN_RMS) return@speechStart false
+                        serviceScope.launch {
+                            audioPlayer.fadeOutAndStop(BARGE_IN_FADE_MS)
+                            streamingClient.interrupt()
+                            _status.value = VoiceSessionStatus.LISTENING
+                            updateNotification()
+                        }
+                        true
+                    } else {
+                        serviceScope.launch {
+                            _status.value = VoiceSessionStatus.LISTENING
+                            updateNotification()
+                        }
+                        true
+                    }
+                },
+                onAudioChunk = { chunk ->
+                    if (_isAlwaysListeningActive.value) streamingClient.sendAudioChunk(chunk)
+                },
+                onSpeechEnd = {
+                    serviceScope.launch {
+                        if (!_isAlwaysListeningActive.value) return@launch
+                        streamingClient.speechEnd()
+                        if (_status.value == VoiceSessionStatus.LISTENING) {
+                            _status.value = VoiceSessionStatus.THINKING
+                            updateNotification()
+                        }
+                    }
+                },
+                onVadDebug = { debug ->
+                    if (_isAlwaysListeningActive.value) {
+                        streamingClient.sendVadDebug(
+                            event = debug.event,
+                            speaking = debug.speaking,
+                            rms = debug.rms,
+                            bufferedBytes = debug.bufferedBytes
+                        )
+                    }
+                }
+            )
+            if (recordResult.isFailure) {
+                _isAlwaysListeningActive.value = false
+                streamingClient.close()
+                _status.value = VoiceSessionStatus.ERROR
+                _errorMessage.value = "Failed to start streaming microphone: ${recordResult.exceptionOrNull()?.message}"
+                updateNotification()
+                return@launch
+            }
+
+            _status.value = VoiceSessionStatus.IDLE
+            _errorMessage.value = null
+            updateNotification()
+        }
+    }
+
+    private fun stopAlwaysListening(endSession: Boolean) {
+        if (!_isAlwaysListeningActive.value) return
+        _isAlwaysListeningActive.value = false
+        streamingAudioRecorder.stop()
+        if (endSession) {
+            streamingClient.endSession()
+        } else {
+            streamingClient.close()
+        }
+        playbackJob?.cancel()
+        audioPlayer.stop()
+        audioRouteManager.enableBluetoothRouting(false)
+        _status.value = VoiceSessionStatus.IDLE
+        updateNotification()
+    }
+
+    private fun streamingListener(settings: HermesSettings) = object : StreamingVoiceClient.Listener {
+        override fun onOpen() {
+            serviceScope.launch {
+                setIsConnected(true)
+            }
+        }
+
+        override fun onSession(sessionId: String, profileName: String) {
+            serviceScope.launch {
+                _sessionId.value = sessionId
+                _agentProfile.value = profileName.ifBlank { settings.selectedProfileName }
+            }
+        }
+
+        override fun onState(status: String) {
+            serviceScope.launch {
+                if (!_isAlwaysListeningActive.value) return@launch
+                _status.value = when (status) {
+                    "thinking" -> VoiceSessionStatus.THINKING
+                    "speaking" -> VoiceSessionStatus.THINKING
+                    "interrupted", "idle", "listening" -> VoiceSessionStatus.IDLE
+                    else -> _status.value
+                }
+                updateNotification()
+            }
+        }
+
+        override fun onFinalTranscript(text: String) {
+            serviceScope.launch {
+                _transcript.value = text
+            }
+        }
+
+        override fun onAssistantTextFinal(text: String) {
+            serviceScope.launch {
+                _responseText.value = text
+                _turnHistory.value = _turnHistory.value + VoiceTurnUi(
+                    id = "${System.currentTimeMillis()}_${_turnHistory.value.size}",
+                    userText = _transcript.value,
+                    assistantText = text,
+                    audioUrl = null,
+                    createdAt = System.currentTimeMillis()
+                )
+            }
+        }
+
+        override fun onAudioUrl(url: String) {
+            serviceScope.launch {
+                _lastAudioUrl.value = url
+                val history = _turnHistory.value
+                if (history.isNotEmpty()) {
+                    _turnHistory.value = history.dropLast(1) + history.last().copy(audioUrl = url)
+                }
+                playStreamingAudio(url, settings)
+            }
+        }
+
+        override fun onError(message: String) {
+            serviceScope.launch {
+                _status.value = VoiceSessionStatus.ERROR
+                _errorMessage.value = message
+                updateNotification()
+            }
+        }
+
+        override fun onClosed() {
+            serviceScope.launch {
+                if (_isAlwaysListeningActive.value) {
+                    _isAlwaysListeningActive.value = false
+                    streamingAudioRecorder.stop()
+                    _status.value = VoiceSessionStatus.ERROR
+                    _errorMessage.value = "Streaming connection closed"
+                    updateNotification()
+                }
+            }
+        }
+    }
+
+    private fun playStreamingAudio(audioUrl: String, settings: HermesSettings) {
+        playbackJob?.cancel()
+        playbackJob = serviceScope.launch {
+            _status.value = VoiceSessionStatus.SPEAKING
+            playbackStartedAtMs = System.currentTimeMillis()
+            streamingAudioRecorder.setPaused(!settings.bargeInEnabled)
+            updateNotification()
+            val playResult = audioPlayer.play(resolveAudioUrl(audioUrl, settings.baseUrl), settings.apiKey)
+            streamingAudioRecorder.setPaused(false)
+            if (_isAlwaysListeningActive.value && _status.value == VoiceSessionStatus.SPEAKING) {
+                _status.value = VoiceSessionStatus.IDLE
+            } else if (!_isAlwaysListeningActive.value && playResult.isSuccess) {
+                _status.value = VoiceSessionStatus.IDLE
+            }
+            if (playResult.isFailure && _status.value == VoiceSessionStatus.SPEAKING) {
+                _status.value = VoiceSessionStatus.ERROR
+                _errorMessage.value = "Audio playback failed, but response received: ${playResult.exceptionOrNull()?.message}"
+            }
+            updateNotification()
+        }
+    }
+
+    private fun createVad(settings: HermesSettings): VoiceVad {
+        if (settings.talkInteractionMode == com.hermes.voiceremote.settings.TalkInteractionMode.ALWAYS_LISTENING) {
+            // ponytail: Silero ONNX is hearing high RMS but not activating on device; RMS keeps the live mode usable while we tune the model path.
+            return RmsVad(
+                sampleRate = StreamingAudioRecorder.SAMPLE_RATE,
+                threshold = 600.0,
+                startMs = 250,
+                endSilenceMs = maxOf(settings.vadSilenceMs, ALWAYS_LISTENING_MIN_SILENCE_MS)
+            )
+        }
+        return when (settings.vadEngine) {
+            VadEngine.RMS -> RmsVad(
+                sampleRate = StreamingAudioRecorder.SAMPLE_RATE,
+                threshold = settings.vadSpeechThreshold.toDouble(),
+                startMs = if (settings.bargeInEnabled) settings.bargeInMinSpeechMs else 250,
+                endSilenceMs = settings.vadSilenceMs
+            )
+            VadEngine.SILERO_ONNX -> SileroOnnxVad(
+                context = this,
+                activationThreshold = settings.vadSpeechThreshold,
+                minSpeechMs = if (settings.bargeInEnabled) settings.bargeInMinSpeechMs else 100,
+                minSilenceMs = settings.vadSilenceMs
+            )
+        }
     }
 
     private fun resolveAudioUrl(audioUrl: String, baseUrl: String): String {
@@ -382,7 +664,7 @@ class VoiceSessionService : Service() {
         val manager = getSystemService(NotificationManager::class.java)
         manager?.notify(NOTIFICATION_ID, notification)
         
-        if (_status.value != VoiceSessionStatus.IDLE) {
+        if (_status.value != VoiceSessionStatus.IDLE || _isAlwaysListeningActive.value) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(
                     NOTIFICATION_ID, 
@@ -428,13 +710,18 @@ class VoiceSessionService : Service() {
             VoiceSessionStatus.SPEAKING -> "Hermes is responding..."
             VoiceSessionStatus.ERROR -> "Session error encountered."
         }
+        val effectiveText = if (_isAlwaysListeningActive.value && status == VoiceSessionStatus.IDLE) {
+            "Always listening is active"
+        } else {
+            text
+        }
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
-            .setContentText(text)
+            .setContentText(effectiveText)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
-            .setOngoing(status != VoiceSessionStatus.IDLE)
+            .setOngoing(status != VoiceSessionStatus.IDLE || _isAlwaysListeningActive.value)
 
          if (status == VoiceSessionStatus.LISTENING) {
             builder.addAction(android.R.drawable.ic_media_pause, "Stop & Send", stopPendingIntent)
@@ -451,9 +738,11 @@ class VoiceSessionService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         serviceScope.cancel()
-        if (_status.value == VoiceSessionStatus.LISTENING) {
+        if (_status.value == VoiceSessionStatus.LISTENING && recordedFile != null) {
             audioRecorder.stopRecording()
         }
+        streamingAudioRecorder.stop()
+        streamingClient.close()
         audioPlayer.release()
     }
 
@@ -468,6 +757,13 @@ class VoiceSessionService : Service() {
         const val ACTION_RESET = "com.hermes.voiceremote.RESET"
         const val ACTION_REPLAY_LAST_RESPONSE = "com.hermes.voiceremote.REPLAY_LAST_RESPONSE"
         const val ACTION_NEW_SESSION = "com.hermes.voiceremote.NEW_SESSION"
+        const val ACTION_TOGGLE_ALWAYS_LISTENING = "com.hermes.voiceremote.TOGGLE_ALWAYS_LISTENING"
+        const val ACTION_SEND_STREAMING_UTTERANCE = "com.hermes.voiceremote.SEND_STREAMING_UTTERANCE"
+
+        private const val BARGE_IN_PLAYBACK_GUARD_MS = 500L
+        private const val BARGE_IN_FADE_MS = 100L
+        private const val BARGE_IN_MIN_RMS = 8000
+        private const val ALWAYS_LISTENING_MIN_SILENCE_MS = 1200
 
         private val _status = MutableStateFlow(VoiceSessionStatus.IDLE)
         val status = _status.asStateFlow()
@@ -504,6 +800,9 @@ class VoiceSessionService : Service() {
 
         private val _lastAudioUrl = MutableStateFlow<String?>(null)
         val lastAudioUrl = _lastAudioUrl.asStateFlow()
+
+        private val _isAlwaysListeningActive = MutableStateFlow(false)
+        val isAlwaysListeningActive = _isAlwaysListeningActive.asStateFlow()
 
         private val _turnHistory = MutableStateFlow<List<VoiceTurnUi>>(emptyList())
         val turnHistory = _turnHistory.asStateFlow()

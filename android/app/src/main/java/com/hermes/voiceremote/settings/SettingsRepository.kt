@@ -4,6 +4,11 @@ import android.content.Context
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.hermes.voiceremote.network.HermesProfileDto
+import com.hermes.voiceremote.network.TtsVoiceDto
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import java.io.IOException
 
 class SettingsRepository(private val context: Context) {
@@ -30,6 +35,16 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    private val moshi = Moshi.Builder()
+        .addLast(KotlinJsonAdapterFactory())
+        .build()
+    private val profilesAdapter = moshi.adapter<List<HermesProfileDto>>(
+        Types.newParameterizedType(List::class.java, HermesProfileDto::class.java)
+    )
+    private val ttsVoicesAdapter = moshi.adapter<List<TtsVoiceDto>>(
+        Types.newParameterizedType(List::class.java, TtsVoiceDto::class.java)
+    )
+
     fun getSettings(): Result<HermesSettings> {
         val prefs = sharedPreferences
         val err = initError
@@ -42,6 +57,7 @@ class SettingsRepository(private val context: Context) {
             val legacyAgentProfile = prefs.getString(KEY_AGENT_PROFILE, null)
             val selectedProfileId = prefs.getString(KEY_SELECTED_PROFILE_ID, legacyAgentProfile ?: "main") ?: "main"
             val selectedProfileName = prefs.getString(KEY_SELECTED_PROFILE_NAME, legacyAgentProfile ?: selectedProfileId) ?: selectedProfileId
+            val selectedTtsVoiceId = prefs.getString(KEY_SELECTED_TTS_VOICE_ID, "") ?: ""
             
             val responseModeStr = prefs.getString(KEY_RESPONSE_MODE, ResponseMode.TEXT_AUDIO.name)
             val responseMode = try {
@@ -64,6 +80,17 @@ class SettingsRepository(private val context: Context) {
                 TalkInteractionMode.TAP_TO_TALK
             }
 
+            val vadEngineStr = prefs.getString(KEY_VAD_ENGINE, VadEngine.RMS.name)
+            val vadEngine = try {
+                VadEngine.valueOf(vadEngineStr ?: VadEngine.RMS.name)
+            } catch (e: Exception) {
+                VadEngine.RMS
+            }
+            val vadSpeechThreshold = prefs.getFloat(KEY_VAD_SPEECH_THRESHOLD, 600f)
+            val vadSilenceMs = prefs.getInt(KEY_VAD_SILENCE_MS, 600)
+            val bargeInEnabled = prefs.getBoolean(KEY_BARGE_IN_ENABLED, false)
+            val bargeInMinSpeechMs = prefs.getInt(KEY_BARGE_IN_MIN_SPEECH_MS, 400)
+
             Result.success(
                 HermesSettings(
                     baseUrl = baseUrl,
@@ -72,7 +99,13 @@ class SettingsRepository(private val context: Context) {
                     selectedProfileName = selectedProfileName,
                     responseMode = responseMode,
                     audioInputPreference = audioPref,
-                    talkInteractionMode = talkInteractionMode
+                    talkInteractionMode = talkInteractionMode,
+                    selectedTtsVoiceId = selectedTtsVoiceId,
+                    vadEngine = vadEngine,
+                    vadSpeechThreshold = vadSpeechThreshold,
+                    vadSilenceMs = vadSilenceMs,
+                    bargeInEnabled = bargeInEnabled,
+                    bargeInMinSpeechMs = bargeInMinSpeechMs
                 )
             )
         } catch (e: Exception) {
@@ -96,6 +129,12 @@ class SettingsRepository(private val context: Context) {
                 .putString(KEY_RESPONSE_MODE, settings.responseMode.name)
                 .putString(KEY_AUDIO_INPUT_PREF, settings.audioInputPreference.name)
                 .putString(KEY_TALK_INTERACTION_MODE, settings.talkInteractionMode.name)
+                .putString(KEY_SELECTED_TTS_VOICE_ID, settings.selectedTtsVoiceId.trim())
+                .putString(KEY_VAD_ENGINE, settings.vadEngine.name)
+                .putFloat(KEY_VAD_SPEECH_THRESHOLD, settings.vadSpeechThreshold)
+                .putInt(KEY_VAD_SILENCE_MS, settings.vadSilenceMs)
+                .putBoolean(KEY_BARGE_IN_ENABLED, settings.bargeInEnabled)
+                .putInt(KEY_BARGE_IN_MIN_SPEECH_MS, settings.bargeInMinSpeechMs)
                 .commit()
             if (success) {
                 Result.success(Unit)
@@ -105,6 +144,40 @@ class SettingsRepository(private val context: Context) {
         } catch (e: Exception) {
             Result.failure(e)
         }
+    }
+
+    fun getCachedProfiles(): List<HermesProfileDto> {
+        val json = sharedPreferences?.getString(KEY_CACHED_PROFILES, null) ?: return emptyList()
+        return try {
+            profilesAdapter.fromJson(json).orEmpty()
+        } catch (e: Exception) {
+            Log.w("SettingsRepository", "Ignoring invalid cached profiles.", e)
+            emptyList()
+        }
+    }
+
+    fun saveCachedProfiles(profiles: List<HermesProfileDto>) {
+        if (profiles.isEmpty()) return
+        sharedPreferences?.edit()
+            ?.putString(KEY_CACHED_PROFILES, profilesAdapter.toJson(profiles))
+            ?.commit()
+    }
+
+    fun getCachedTtsVoices(): List<TtsVoiceDto> {
+        val json = sharedPreferences?.getString(KEY_CACHED_TTS_VOICES, null) ?: return emptyList()
+        return try {
+            ttsVoicesAdapter.fromJson(json).orEmpty()
+        } catch (e: Exception) {
+            Log.w("SettingsRepository", "Ignoring invalid cached TTS voices.", e)
+            emptyList()
+        }
+    }
+
+    fun saveCachedTtsVoices(voices: List<TtsVoiceDto>) {
+        if (voices.isEmpty()) return
+        sharedPreferences?.edit()
+            ?.putString(KEY_CACHED_TTS_VOICES, ttsVoicesAdapter.toJson(voices))
+            ?.commit()
     }
 
     fun hasSettings(): Boolean {
@@ -127,5 +200,13 @@ class SettingsRepository(private val context: Context) {
         private const val KEY_RESPONSE_MODE = "response_mode"
         private const val KEY_AUDIO_INPUT_PREF = "audio_input_pref"
         private const val KEY_TALK_INTERACTION_MODE = "talk_interaction_mode"
+        private const val KEY_SELECTED_TTS_VOICE_ID = "selected_tts_voice_id"
+        private const val KEY_VAD_ENGINE = "vad_engine"
+        private const val KEY_VAD_SPEECH_THRESHOLD = "vad_threshold"
+        private const val KEY_VAD_SILENCE_MS = "vad_silence_ms"
+        private const val KEY_BARGE_IN_ENABLED = "barge_in_enabled"
+        private const val KEY_BARGE_IN_MIN_SPEECH_MS = "barge_in_min_speech_ms"
+        private const val KEY_CACHED_PROFILES = "cached_profiles"
+        private const val KEY_CACHED_TTS_VOICES = "cached_tts_voices"
     }
 }

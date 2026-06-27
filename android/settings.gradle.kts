@@ -25,3 +25,4 @@ dependencyResolutionManagement {
 rootProject.name = "HermesVoiceRemote"
 
 include(":app")
+include(":wear")

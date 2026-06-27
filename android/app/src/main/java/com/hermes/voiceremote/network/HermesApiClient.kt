@@ -33,6 +33,31 @@ class HermesApiClient {
         return finalUrl.toHttpUrlOrNull() ?: throw IllegalArgumentException("Malformed Base URL: $finalUrl")
     }
 
+    fun getStreamUrl(settings: HermesSettings, sessionId: String? = null): String {
+        val httpUrl = getUrl(settings.baseUrl, HermesGatewayRoutes.stream())
+        val scheme = when (httpUrl.scheme) {
+            "https" -> "wss"
+            "http" -> "ws"
+            else -> throw IllegalArgumentException("Streaming requires http:// or https:// Base URL")
+        }
+        val responseModeStr = when (settings.responseMode) {
+            ResponseMode.TEXT -> "text"
+            ResponseMode.TEXT_AUDIO -> "text_audio"
+        }
+        val builder = httpUrl.newBuilder()
+            .addQueryParameter("profileId", settings.selectedProfileId)
+            .addQueryParameter("agent", settings.selectedProfileName)
+            .addQueryParameter("responseMode", responseModeStr)
+        if (settings.selectedTtsVoiceId.isNotBlank()) {
+            builder.addQueryParameter("ttsVoiceId", settings.selectedTtsVoiceId)
+        }
+        if (!sessionId.isNullOrEmpty()) {
+            builder.addQueryParameter("sessionId", sessionId)
+        }
+        val url = builder.build().toString()
+        return "$scheme://${url.substringAfter("://")}"
+    }
+
     private suspend fun executeCancellable(request: Request): Result<String> =
         suspendCancellableCoroutine { cont ->
             val call = baseOkHttpClient.newCall(request)
@@ -117,7 +142,8 @@ class HermesApiClient {
             val requestBodyObj = CreateSessionRequest(
                 profileId = settings.selectedProfileId,
                 agent = settings.selectedProfileName,
-                responseMode = responseModeStr
+                responseMode = responseModeStr,
+                ttsVoiceId = settings.selectedTtsVoiceId.takeIf { it.isNotBlank() }
             )
             val jsonAdapter = moshi.adapter(CreateSessionRequest::class.java)
             val jsonBody = jsonAdapter.toJson(requestBodyObj)
@@ -177,6 +203,11 @@ class HermesApiClient {
                 .addFormDataPart("profileId", settings.selectedProfileId)
                 .addFormDataPart("agent", settings.selectedProfileName)
                 .addFormDataPart("responseMode", responseModeStr)
+                .apply {
+                    if (settings.selectedTtsVoiceId.isNotBlank()) {
+                        addFormDataPart("ttsVoiceId", settings.selectedTtsVoiceId)
+                    }
+                }
                 .build()
 
             val request = Request.Builder()
@@ -227,6 +258,35 @@ class HermesApiClient {
             val resultStr = executeCancellable(request)
             return resultStr.map { bodyStr ->
                 val adapter = moshi.adapter(ProfilesResponse::class.java)
+                adapter.fromJson(bodyStr) ?: throw IOException("Invalid JSON response")
+            }
+        } catch (e: Exception) {
+            return Result.failure(e)
+        }
+    }
+
+    suspend fun getTtsVoices(settings: HermesSettings): Result<TtsVoicesResponse> {
+        try {
+            if (settings.baseUrl.isEmpty()) {
+                return Result.failure(IllegalArgumentException("Base URL is empty"))
+            }
+            if (settings.apiKey.isEmpty()) {
+                return Result.failure(IllegalArgumentException("API Key is empty"))
+            }
+
+            val url = getUrl(settings.baseUrl, HermesGatewayRoutes.TTS_VOICES).newBuilder()
+                .addQueryParameter("profileId", settings.selectedProfileId)
+                .addQueryParameter("agent", settings.selectedProfileName)
+                .build()
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .header("Authorization", "Bearer ${settings.apiKey}")
+                .build()
+
+            val resultStr = executeCancellable(request)
+            return resultStr.map { bodyStr ->
+                val adapter = moshi.adapter(TtsVoicesResponse::class.java)
                 adapter.fromJson(bodyStr) ?: throw IOException("Invalid JSON response")
             }
         } catch (e: Exception) {

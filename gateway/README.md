@@ -88,7 +88,7 @@ The default `TTS_PROVIDER=hermes` calls Hermes' built-in TTS implementation from
 HERMES_TTS_PYTHON=/path/to/.hermes/hermes-agent/venv/bin/python
 ```
 
-That uses the same Hermes TTS provider and voice configured in Hermes itself. Set `TTS_PROVIDER=openai_compatible` only when pointing this gateway at a separate OpenAI-compatible speech service.
+That uses the same Hermes TTS provider and voice configured in Hermes itself. The Android app can optionally send `ttsVoiceId` to override the configured voice for a single session/turn without rewriting Hermes config. Set `TTS_PROVIDER=openai_compatible` only when pointing this gateway at a separate OpenAI-compatible speech service.
 
 ## API
 
@@ -134,13 +134,34 @@ Returns:
 }
 ```
 
+### `GET /tts/voices`
+
+Returns voices for the configured TTS provider. For the current Hermes Edge TTS provider, this is filtered to English, GA, natural neural voices and excludes preview/multilingual variants.
+
+```json
+{
+  "provider": "edge",
+  "defaultVoiceId": "en-US-AriaNeural",
+  "voices": [
+    {
+      "id": "en-US-AriaNeural",
+      "name": "Microsoft Aria Online (Natural) - English (United States)",
+      "provider": "edge",
+      "locale": "en-US",
+      "gender": "Female"
+    }
+  ]
+}
+```
+
 ### `POST /voice/session`
 
 ```json
 {
   "profileId": "main",
   "agent": "Main",
-  "responseMode": "text_audio"
+  "responseMode": "text_audio",
+  "ttsVoiceId": "en-US-AriaNeural"
 }
 ```
 
@@ -153,6 +174,7 @@ Multipart fields:
 - `profileId`: selected Hermes profile id
 - `agent`: selected Hermes profile name
 - `responseMode`: `text` or `text_audio`
+- `ttsVoiceId`: optional TTS voice id from `GET /tts/voices`
 
 ### `POST /voice/session/:sessionId/cancel`
 
@@ -165,6 +187,39 @@ Clears turn history for the current session and keeps the selected profile. Retu
 ### `POST /voice/session/:sessionId/end`
 
 Invalidates the current session. Returns `204`.
+
+### `WS /voice/stream`
+
+Experimental always-listening transport. The existing HTTP turn API remains the stable baseline.
+
+Open:
+
+```text
+WS /voice/stream?sessionId=<optional>&profileId=main&agent=Main&responseMode=text_audio
+Authorization: Bearer <GATEWAY_API_KEY>
+```
+
+Client events:
+
+```json
+{ "type": "audio_chunk", "seq": 1, "format": "pcm16", "sampleRate": 16000, "data": "base64..." }
+{ "type": "speech_end" }
+{ "type": "interrupt" }
+{ "type": "end_session" }
+```
+
+Server events:
+
+```json
+{ "type": "session", "sessionId": "sess_...", "profileId": "main", "profileName": "Main" }
+{ "type": "state", "status": "listening" }
+{ "type": "final_transcript", "text": "..." }
+{ "type": "assistant_text_final", "text": "..." }
+{ "type": "audio_url", "url": "/audio/..." }
+{ "type": "error", "message": "..." }
+```
+
+Streaming v1 buffers one PCM16 mono 16 kHz utterance, writes a temporary WAV, then reuses the existing STT, Hermes, and TTS pipeline. It does not fake partial transcripts, assistant text deltas, or streamed audio chunks. `interrupt` is best-effort: the gateway ignores stale in-flight results and calls the current Hermes cancel hook where available.
 
 ### `GET /audio/:fileName`
 

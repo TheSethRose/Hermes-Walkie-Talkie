@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.util.Log
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -145,6 +146,27 @@ class AudioPlayer(private val context: Context) {
             mediaPlayer = null
             cleanCache()
         }
+    }
+
+    suspend fun fadeOutAndStop(durationMs: Long = 100) {
+        val player = mediaPlayer
+        if (player == null || !player.isPlaying) {
+            stop()
+            return
+        }
+
+        val steps = 5
+        val stepDelay = (durationMs / steps).coerceAtLeast(1)
+        for (step in steps downTo 1) {
+            val volume = (step - 1).toFloat() / steps
+            try {
+                player.setVolume(volume, volume)
+            } catch (_: Exception) {
+                break
+            }
+            delay(stepDelay)
+        }
+        stop()
     }
 
     fun release() {

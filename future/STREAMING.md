@@ -10,7 +10,7 @@ Add a future voice mode that feels closer to a live assistant:
 - interruption is not overly sensitive to background noise
 - current HTTP gateway/app flow keeps working
 
-This is not a near-term rewrite. The current request/response gateway remains the stable baseline.
+This is no longer only future work. Streaming v1 adds an experimental WebSocket transport, while the current request/response gateway remains the stable baseline.
 
 ## Current Limitation
 
@@ -34,7 +34,25 @@ Streaming needs a second transport alongside the existing HTTP endpoints. Good c
 - SSE plus HTTP upload chunks: simpler server-to-client streaming, weaker for live microphone/control events.
 - Chunked HTTP audio: useful for response audio only, not enough for full duplex voice.
 
-Recommended path: WebSocket for the future streaming mode, while keeping the current HTTP API unchanged.
+Chosen path: WebSocket for the experimental streaming mode, while keeping the current HTTP API unchanged.
+
+## Implemented V1 Boundary
+
+Streaming v1 is intentionally modest:
+
+- Android always-listening mode opens a WebSocket only after the main Talk button is pressed.
+- Android sends PCM16 mono 16 kHz microphone chunks after local VAD detects speech.
+- Gateway buffers one utterance, writes a WAV, then reuses existing STT, Hermes, and TTS services.
+- Gateway returns final transcript, final assistant text, and an audio URL.
+- Existing full-file MP3 playback remains in use.
+
+Not implemented in v1:
+
+- partial transcript streaming
+- assistant text deltas
+- streamed response audio chunks
+- wake word
+- sensitivity settings
 
 ## Proposed Session Flow
 

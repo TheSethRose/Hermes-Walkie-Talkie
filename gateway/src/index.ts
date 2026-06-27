@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from "fastify";
 import multipart from "@fastify/multipart";
+import websocket from "@fastify/websocket";
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { audioRoutes } from "./routes/audio.js";
@@ -48,6 +49,7 @@ await app.register(multipart, {
     fields: 8
   }
 });
+await app.register(websocket);
 
 const sessions = new SessionStore();
 const profiles = new ProfileStore(config);

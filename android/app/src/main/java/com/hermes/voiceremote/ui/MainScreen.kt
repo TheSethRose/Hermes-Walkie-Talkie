@@ -48,7 +48,11 @@ fun MainScreen(
         val micGranted = permissions[Manifest.permission.RECORD_AUDIO] 
             ?: (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
         if (micGranted) {
-            viewModel.onTalkPressStart()
+            if (settings.talkInteractionMode == com.hermes.voiceremote.settings.TalkInteractionMode.ALWAYS_LISTENING) {
+                viewModel.onTalkButtonPressed()
+            } else {
+                viewModel.onTalkPressStart()
+            }
         } else {
             Toast.makeText(context, "Microphone permission is required to record audio.", Toast.LENGTH_LONG).show()
         }
@@ -80,7 +84,11 @@ fun MainScreen(
         }
 
         if (requiredPermissions.isEmpty()) {
-            viewModel.onTalkPressStart()
+            if (settings.talkInteractionMode == com.hermes.voiceremote.settings.TalkInteractionMode.ALWAYS_LISTENING) {
+                viewModel.onTalkButtonPressed()
+            } else {
+                viewModel.onTalkPressStart()
+            }
         } else {
             permissionLauncher.launch(requiredPermissions.toTypedArray())
         }
@@ -163,6 +171,7 @@ fun MainScreen(
                 TalkButton(
                     status = uiState.status,
                     talkInteractionMode = settings.talkInteractionMode,
+                    isAlwaysListeningActive = uiState.isAlwaysListeningActive,
                     onTap = { handleTalkTap() },
                     onPressStart = { handlePushTalkStart() },
                     onPressEnd = { handlePushTalkEnd() }

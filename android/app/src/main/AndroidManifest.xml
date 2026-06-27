@@ -35,6 +35,18 @@
             android:name="com.hermes.voiceremote.service.VoiceSessionService"
             android:foregroundServiceType="microphone"
             android:exported="false" />
+
+        <service
+            android:name="com.hermes.voiceremote.wear.WearPttListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:host="*"
+                    android:pathPrefix="/hermes/ptt"
+                    android:scheme="wear" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

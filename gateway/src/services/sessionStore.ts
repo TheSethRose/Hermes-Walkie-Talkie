@@ -8,6 +8,7 @@ export type VoiceSession = {
   profileName: string;
   agent: string;
   responseMode: ResponseMode;
+  ttsVoiceId?: string;
   createdAt: string;
   lastActivityAt: string;
   canceled: boolean;
@@ -23,7 +24,7 @@ export type VoiceTurn = {
 export class SessionStore {
   private sessions = new Map<string, VoiceSession>();
 
-  create(profileId: string, profileName: string, responseMode: ResponseMode) {
+  create(profileId: string, profileName: string, responseMode: ResponseMode, ttsVoiceId?: string) {
     const now = new Date().toISOString();
     const session: VoiceSession = {
       sessionId: `sess_${randomUUID()}`,
@@ -31,6 +32,7 @@ export class SessionStore {
       profileName,
       agent: profileName,
       responseMode,
+      ttsVoiceId,
       createdAt: now,
       lastActivityAt: now,
       canceled: false,
